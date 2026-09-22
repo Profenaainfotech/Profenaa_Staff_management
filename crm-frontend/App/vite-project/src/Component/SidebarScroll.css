@@ -1,0 +1,83 @@
+/* SidebarScroll: the scrolling middle part of a sidebar.
+   The logo and the Log Out button stay where they are; only the menu scrolls.
+   Class prefix: sbs- */
+
+.sbs {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0; /* lets the flex child shrink so it can scroll instead of pushing things off screen */
+}
+
+.sbs-scroll {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* scrolling the menu never scrolls the page behind it */
+  scrollbar-width: thin;
+  scrollbar-color: var(--sbs-thumb) transparent;
+}
+
+.sbs-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sbs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sbs-scroll::-webkit-scrollbar-thumb {
+  background: var(--sbs-thumb);
+  border-radius: 999px;
+}
+.sbs-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--sbs-thumb-hover);
+}
+
+/* the content is at least as tall as the area, so a footer inside it can be pushed to the bottom */
+.sbs-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* soft fade at the top / bottom edge when there is more to scroll to */
+.sbs-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.sbs-fade--top {
+  top: 0;
+  background: linear-gradient(to bottom, var(--sbs-bg), transparent);
+}
+.sbs-fade--bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--sbs-bg), transparent);
+}
+.sbs-fade--on {
+  opacity: 1;
+}
+
+/* themes */
+.sbs--light {
+  --sbs-bg: #ffffff;
+  --sbs-thumb: #cbd5e1;
+  --sbs-thumb-hover: #94a3b8;
+}
+.sbs--dark {
+  --sbs-bg: var(--color-blue-950, #172554);
+  --sbs-thumb: rgba(148, 163, 184, 0.35);
+  --sbs-thumb-hover: rgba(148, 163, 184, 0.65);
+}
+
+/* On short screens (small laptops) the menu items sit a little closer together,
+   so the whole menu fits without scrolling wherever possible. */
+@media (max-height: 780px) {
+  .sbs-item {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}

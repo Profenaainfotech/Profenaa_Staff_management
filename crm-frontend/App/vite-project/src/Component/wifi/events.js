@@ -1,0 +1,40 @@
+// Human wording for audit-log event types and session end reasons (server: AttendanceEvent.Model / attendanceCore)
+export const EVENT = {
+  CHECK_IN: { label: "Checked in", tone: "green" },
+  RETURN: { label: "Back on Wi-Fi", tone: "green" },
+  WIFI_RECONNECTED: { label: "Reconnected", tone: "green" },
+  SESSION_RESTORED: { label: "Restored from offline queue", tone: "blue" },
+  WIFI_CHANGED: { label: "Moved to another network", tone: "amber" },
+  DISCONNECTED: { label: "Wi-Fi disconnected", tone: "amber" },
+  WARNING: { label: "Grace period started", tone: "amber" },
+  CHECK_OUT: { label: "Session ended", tone: "slate" },
+  AUTO_CHECK_OUT: { label: "Auto-closed after shift", tone: "slate" },
+  MANUAL_EDIT: { label: "Manual edit", tone: "violet" },
+  DEVICE_REGISTERED: { label: "Device registered", tone: "blue" },
+  DEVICE_APPROVED: { label: "Device approved", tone: "green" },
+  DEVICE_REVOKED: { label: "Device revoked", tone: "red" },
+  REJECTED_NETWORK: { label: "Unregistered network", tone: "red" },
+  CRM_LOGIN: { label: "Signed in to the CRM", tone: "blue" },
+  CRM_LOGOUT: { label: "Logged out of the CRM", tone: "slate" },
+  OVERTIME_ASKED: { label: "Asked: still working?", tone: "amber" },
+  OVERTIME_CONFIRMED: { label: "Overtime confirmed", tone: "orange" },
+  OVERTIME_DECLINED: { label: "Finished at shift end", tone: "slate" },
+  OVERTIME_NO_RESPONSE: { label: "No reply at shift end", tone: "red" },
+  REVIEW_EXPLAINED: { label: "Explanation sent", tone: "violet" },
+  REVIEW_DECIDED: { label: "Admin decision", tone: "violet" },
+};
+export const eventInfo = (t) => EVENT[t] || { label: t, tone: "slate" };
+
+export const END_REASON = {
+  WIFI_DISCONNECTED: "Wi-Fi disconnected",
+  WIFI_CHANGED: "Moved off the office network",
+  DEVICE_OFFLINE: "Device went offline",
+  SYSTEM_SHUTDOWN: "Computer shut down",
+  AUTO_SHIFT_END: "Auto-closed after shift end",
+  DAY_ROLLOVER: "End of day",
+  MANUAL: "Manual entry",
+  CRM_LOGOUT: "Logged out of the CRM",
+  CRM_LOGOUT_UNVERIFIED: "Logged out (office Wi-Fi not confirmed)",
+  OVERTIME_DECLINED: "Finished at shift end",
+  NO_RESPONSE: "No reply to the shift-end question",
+};
