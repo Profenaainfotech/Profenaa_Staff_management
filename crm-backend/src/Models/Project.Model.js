@@ -100,8 +100,24 @@ const ProjectSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["Pending", "In Progress", "Completed"],
+      enum: ["Pending", "In Progress", "Submitted", "Completed"],
       default: "Pending",
+    },
+
+    // The staff member's proof of work (a GitHub link, a Drive link, etc.), submitted for
+    // admin review before a project can be marked Completed.
+    submissionLink: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // When the current submission was sent in. Used (not the admin's approval time) to work
+    // out whether the project was finished on time, so a slow admin review never counts against
+    // the staff member.
+    submittedAt: {
+      type: Date,
+      default: null,
     },
 
     // Filled in when the project is completed (used by the staff competition)

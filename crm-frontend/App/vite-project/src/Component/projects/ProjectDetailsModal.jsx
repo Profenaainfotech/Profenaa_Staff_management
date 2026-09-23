@@ -1,6 +1,6 @@
 // Read-only details of one project (staff): what to fix, description, all images, validity time.
 import React, { useEffect, useState } from "react";
-import { CalendarClock, CheckCircle2, Clock3, Image as ImageIcon, TriangleAlert, UserRound, X } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock3, ExternalLink, Image as ImageIcon, Send, TriangleAlert, UserRound, X } from "lucide-react";
 import { STATUS_STYLE, TYPE_STYLE, fmtDateTime, fmtMinutes, imageUrl, projectImages, timeLeft } from "./projectApi";
 
 export default function ProjectDetailsModal({ project, onClose }) {
@@ -13,7 +13,7 @@ export default function ProjectDetailsModal({ project, onClose }) {
   }, [onClose]);
   if (!project) return null;
 
-  const left = project.status === "Completed" ? null : timeLeft(project.dueDate);
+  const left = project.status === "Completed" || project.status === "Submitted" ? null : timeLeft(project.dueDate);
   const tone = { green: "text-emerald-600", amber: "text-amber-600", red: "text-red-600", slate: "text-slate-500" };
 
   return (
@@ -62,6 +62,18 @@ export default function ProjectDetailsModal({ project, onClose }) {
                 <TriangleAlert size={14} /> Error / change required
               </p>
               <p className="whitespace-pre-wrap text-sm font-semibold text-amber-900">{project.issueDetails}</p>
+            </div>
+          )}
+
+          {project.submissionLink && (
+            <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
+              <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-indigo-700">
+                <Send size={14} /> {project.status === "Submitted" ? "Awaiting admin approval" : "Your submission"}
+              </p>
+              <p className="mb-2 text-xs text-indigo-800">{project.submittedAt ? `Sent ${fmtDateTime(project.submittedAt)}` : "Sent for review"}</p>
+              <a href={project.submissionLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100">
+                <ExternalLink size={13} /> Open link
+              </a>
             </div>
           )}
 

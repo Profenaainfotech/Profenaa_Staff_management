@@ -284,8 +284,8 @@ async function run() {
   check("a forgotten old claim on a project that is in the pool does not block it", r.status === 200 && r.body.project.assignedToName === "Karthik", r.body);
   await call("PUT", `${P}/update-status/${ST._id}`, { token: admin, body: { status: "Completed" } }); // Karthik is free again
 
-  // ================================================== START + COMPLETE
-  section("Start, complete, on time and late");
+  // ================================================== START, SUBMIT, APPROVE
+  section("Start, submit for review, admin approves - on time and late");
   r = await call("PUT", `${P}/start/${AS1._id}`, { token: tA, body: {} });
   check("only the person who holds it can start it (403)", r.status === 403, r);
   r = await call("PUT", `${P}/start/${AS1._id}`, { token: tB, body: {} });
@@ -299,32 +299,76 @@ async function run() {
   r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Done" } });
   check("an unknown status is refused", r.status === 400, r);
   r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Completed" } });
+  check("staff can no longer mark their own project completed", r.status === 400 && /Only an admin can mark/i.test(r.body.message), r.body);
+  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Submitted" } });
+  check("staff cannot skip to Submitted without the submit action either", r.status === 400 && /Submit your work with a link/i.test(r.body.message), r.body);
+
+  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tA, body: { link: "https://github.com/example/repo" } });
+  check("someone else cannot submit it (403)", r.status === 403, r);
+  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: {} });
+  check("submitting with no link is refused", r.status === 400 && /Add a link/i.test(r.body.message), r.body);
+  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "not a link" } });
+  check("submitting with something that is not a real link is refused", r.status === 400 && /does not look like a valid link/i.test(r.body.message), r.body);
+  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "ftp://example.com/file" } });
+  check("a non-http(s) link is refused", r.status === 400 && /http/i.test(r.body.message), r.body);
+
+  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "https://github.com/example/repo" } });
+  check("submitting a real link works: status becomes Submitted", r.status === 200 && r.body.project.status === "Submitted" && r.body.project.submissionLink === "https://github.com/example/repo" && Boolean(r.body.project.submittedAt), r.body);
+  check("...admins are told there is work to review", Boolean(await notified({ recipientType: "admin", type: "PROJECT_SUBMITTED" })));
+  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "https://drive.google.com/x" } });
+  check("submitting a second time while already submitted is refused", r.status === 400 && /already submitted/i.test(r.body.message), r.body);
+
+  r = await call("PUT", `${P}/self-assign/${ST._id}`, { token: tB, body: {} });
+  check("while Submitted, Praveen still cannot take another project (it still counts as active)", r.status === 400 && /Finish it \(or wait for admin approval\)/i.test(r.body.message), r.body);
+
+  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Completed" } });
+  check("staff still cannot approve their own submission", r.status === 400 && /Only an admin/i.test(r.body.message), r.body);
+  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: admin, body: { status: "Completed" } });
   const done1 = r.body.project;
-  check("complete before the validity time: on time, with the minutes it took", r.status === 200 && done1.status === "Completed" && done1.completedOnTime === true && typeof done1.completionMinutes === "number" && done1.completedAt, r.body);
-  check("...admin is told", Boolean(await notified({ recipientType: "admin", type: "PROJECT_COMPLETED" })));
+  check("admin approves: on time (before the validity time), with the minutes it took", r.status === 200 && done1.status === "Completed" && done1.completedOnTime === true && typeof done1.completionMinutes === "number" && done1.completedAt, r.body);
+  check("...Praveen is told his submission was approved", Boolean(await notified({ recipientId: B._id, type: "PROJECT_APPROVED" })));
   r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "In Progress" } });
   check("staff cannot move a project backwards (400)", r.status === 400 && /cannot go back/i.test(r.body.message), r.body);
 
   const L1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Will be late", assignedTo: String(B._id) })) })).body.project;
   await Project.updateOne({ _id: L1._id }, { $set: { dueDate: new Date(Date.now() - 3600 * 1000) } });
-  r = await call("PUT", `${P}/update-status/${L1._id}`, { token: tB, body: { status: "Completed" } });
-  check("complete AFTER the validity time: marked late", r.status === 200 && r.body.project.completedOnTime === false, r.body);
-  check("...a project completed straight from Pending gets a start time too", Boolean(r.body.project.startedAt) && r.body.project.completionMinutes === 0, r.body);
-
+  r = await call("PUT", `${P}/start/${L1._id}`, { token: tB, body: {} });
+  check("(set-up) Praveen starts the late project", r.status === 200, r);
+  r = await call("PUT", `${P}/submit/${L1._id}`, { token: tB, body: { link: "https://drive.google.com/late-work" } });
+  check("(set-up) Praveen submits it, after the validity time has already passed", r.status === 200 && r.body.project.status === "Submitted", r.body);
   r = await call("PUT", `${P}/update-status/${L1._id}`, { token: admin, body: { status: "In Progress" } });
-  check("admin can correct a status (even backwards); the result is cleared", r.status === 200 && r.body.project.status === "In Progress" && r.body.project.completedAt === null && r.body.project.completedOnTime === null && r.body.project.completionMinutes === null, r.body);
+  check("admin sends it back instead of approving: the submission is cleared for a fresh resubmission", r.status === 200 && r.body.project.status === "In Progress" && r.body.project.submissionLink === "" && r.body.project.submittedAt === null, r.body);
+  check("...Praveen is told it needs changes", Boolean(await notified({ recipientId: B._id, type: "PROJECT_SENT_BACK" })));
+  r = await call("PUT", `${P}/submit/${L1._id}`, { token: tB, body: { link: "https://drive.google.com/late-work-v2" } });
+  check("(set-up) Praveen resubmits", r.status === 200, r);
+  r = await call("PUT", `${P}/update-status/${L1._id}`, { token: admin, body: { status: "Completed" } });
+  check("admin approves this time: marked late (even this resubmission came after the validity time)", r.status === 200 && r.body.project.completedOnTime === false, r.body);
+
+  const L3 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "On time, but admin is slow to review", assignedTo: String(B._id) })) })).body.project;
+  await Project.updateOne({ _id: L3._id }, { $set: { dueDate: new Date(Date.now() + 1500) } }); // valid for only 1.5 more seconds
+  await call("PUT", `${P}/start/${L3._id}`, { token: tB, body: {} });
+  r = await call("PUT", `${P}/submit/${L3._id}`, { token: tB, body: { link: "https://github.com/example/on-time" } });
+  check("(set-up) submitted comfortably before the validity time runs out", r.status === 200, r);
+  await sleep(2000); // the validity time has now passed - only the ADMIN got round to it late, not the staff member
+  r = await call("PUT", `${P}/update-status/${L3._id}`, { token: admin, body: { status: "Completed" } });
+  check("still marked ON TIME: judged by when the work was submitted, not by how slowly the admin approved it", r.status === 200 && r.body.project.completedOnTime === true, r.body);
+
+  const L2 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Admin completes directly", assignedTo: String(B._id) })) })).body.project;
+  r = await call("PUT", `${P}/update-status/${L2._id}`, { token: admin, body: { status: "Completed" } });
+  check("an admin can still complete a project directly, bypassing submission entirely (override power)", r.status === 200 && r.body.project.status === "Completed" && Boolean(r.body.project.startedAt) && r.body.project.completionMinutes === 0, r.body);
+
   r = await call("PUT", `${P}/update-status/${E1._id}`, { token: admin, body: { status: "Completed" } });
   check("admin cannot complete a project nobody holds", r.status === 400 && /Assign the project/i.test(r.body.message), r.body);
 
   r = await call("GET", `${P}/stats/${B._id}`, { token: tB });
-  check("a person's own numbers", r.status === 200 && r.body.stats.completed === 1 && r.body.stats.onTime === 1 && r.body.stats.inProgress >= 1, r.body);
+  check("a person's own numbers, including how many are awaiting review", r.status === 200 && r.body.stats.completed === 4 && r.body.stats.onTime === 3 && r.body.stats.late === 1 && r.body.stats.submitted === 0, r.body);
   r = await call("GET", `${P}/stats/${B._id}`, { token: tA });
   check("...are private (403)", r.status === 403, r);
 
   section("Races: two clicks at the same moment");
   // Yokesh finishes his project, so Yokesh and Karthik are both free
-  r = await call("PUT", `${P}/update-status/${I1._id}`, { token: tA, body: { status: "Completed" } });
-  check("(set-up) Yokesh completes his project", r.status === 200 && r.body.project.status === "Completed", r.body);
+  r = await call("PUT", `${P}/update-status/${I1._id}`, { token: admin, body: { status: "Completed" } });
+  check("(set-up) admin completes Yokesh's project directly, freeing him up", r.status === 200 && r.body.project.status === "Completed", r.body);
   const R1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Race for one project" })) })).body.project;
   const both = await Promise.all([call("PUT", `${P}/self-assign/${R1._id}`, { token: tA, body: {} }), call("PUT", `${P}/self-assign/${R1._id}`, { token: tC, body: {} })]);
   const wins = both.filter((x) => x.status === 200);
@@ -360,6 +404,7 @@ async function run() {
   const b2 = await mkProject({ title: "Proj B2" }, B, "Completed");
   await Project.updateOne({ _id: b2._id }, { $set: { completedOnTime: false } }); // B finished this one late
   await mkProject({ title: "C-open", projectType: "External" }, C, "In Progress");
+  await mkProject({ title: "A-submitted" }, A, "Submitted");
   await mkProject({ title: "Nobody yet 1" });
   await mkProject({ title: "Nobody yet 2", projectType: "External" });
   await mkProject({ title: "Overdue one" }, null, null, { dueDate: new Date(Date.now() - 86400000) });
@@ -368,10 +413,11 @@ async function run() {
   const lb = r.body.leaderboard;
   check("leaderboard answers for staff", r.status === 200 && Array.isArray(lb) && lb.length === 3, r.body);
   check("rank 1 is the person with the most on-time completions (2 x 10 = 20 points)", lb[0].name === "Yokesh" && lb[0].points === 20 && lb[0].completed === 2 && lb[0].onTime === 2 && lb[0].rank === 1, lb[0]);
+  check("...a project still awaiting admin review counts as active, not completed", lb[0].active === 1, lb[0]);
   check("rank 2: one on time + one late (10 + 5 = 15 points, 50% on time)", lb[1].name === "Praveen" && lb[1].points === 15 && lb[1].onTime === 1 && lb[1].late === 1 && lb[1].onTimeRate === 50, lb[1]);
   check("rank 3: nothing completed yet, but still listed with their open project", lb[2].name === "Karthik" && lb[2].points === 0 && lb[2].active === 1 && lb[2].rank === 3, lb[2]);
   check("a person can see where THEY stand", r.body.me?.name === "Yokesh" && r.body.me.rank === 1);
-  check("team progress: 8 projects, 4 completed (50%), 1 in progress, 3 available, 1 overdue", r.body.team.total === 8 && r.body.team.completed === 4 && r.body.team.inProgress === 1 && r.body.team.available === 3 && r.body.team.overdue === 1 && r.body.team.percentComplete === 50, r.body.team);
+  check("team progress: 9 projects, 4 completed (44%), 1 in progress, 1 submitted, 3 available, 1 overdue", r.body.team.total === 9 && r.body.team.completed === 4 && r.body.team.inProgress === 1 && r.body.team.submitted === 1 && r.body.team.available === 3 && r.body.team.overdue === 1 && r.body.team.percentComplete === 44, r.body.team);
   r = await call("GET", `${P}/leaderboard?type=External`, { token: admin });
   check("filter by type: External only (admin view has no personal row)", r.body.type === "External" && r.body.team.total === 2 && r.body.team.completed === 0 && r.body.me === null, r.body.team);
   r = await call("GET", `${P}/leaderboard?type=Internal`, { token: tB });

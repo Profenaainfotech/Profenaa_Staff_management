@@ -43,6 +43,7 @@ import {
   Zap,
   Pencil,
   Trash2,
+  Send,
 } from "lucide-react";
 import ProjectFormModal from "./projects/ProjectFormModal";
 import {
@@ -219,7 +220,7 @@ const isSameDay = (date1, date2) => {
 const isOverdue = (project) => {
   if (!project?.dueDate) return false;
 
-  if (getProjectStatus(project) === "Completed") {
+  if (getProjectStatus(project) === "Completed" || getProjectStatus(project) === "Submitted") {
     return false;
   }
 
@@ -284,7 +285,8 @@ const isDueSoon = (project) => {
 
   if (
     getProjectStatus(project) ===
-    "Completed"
+      "Completed" ||
+    getProjectStatus(project) === "Submitted"
   ) {
     return false;
   }
@@ -325,6 +327,9 @@ const getStatusClasses = (status) => {
     case "Completed":
       return "bg-emerald-100 text-emerald-700 border-emerald-200";
 
+    case "Submitted":
+      return "bg-indigo-100 text-indigo-700 border-indigo-200";
+
     case "In Progress":
       return "bg-blue-100 text-blue-700 border-blue-200";
 
@@ -339,6 +344,9 @@ const getStatusIcon = (status) => {
     case "Completed":
       return <CheckCircle2 size={14} />;
 
+    case "Submitted":
+      return <Send size={14} />;
+
     case "In Progress":
       return <PlayCircle size={14} />;
 
@@ -351,6 +359,9 @@ const getProgress = (project) => {
   switch (getProjectStatus(project)) {
     case "Completed":
       return 100;
+
+    case "Submitted":
+      return 80;
 
     case "In Progress":
       return 50;
@@ -365,6 +376,9 @@ const getProgressClasses = (project) => {
   switch (getProjectStatus(project)) {
     case "Completed":
       return "bg-emerald-500";
+
+    case "Submitted":
+      return "bg-indigo-500";
 
     case "In Progress":
       return "bg-blue-500";
@@ -1191,6 +1205,10 @@ export default function ProjectManagement() {
             In Progress
           </option>
 
+          <option value="Submitted">
+            Submitted (awaiting review)
+          </option>
+
           <option value="Completed">
             Completed
           </option>
@@ -1201,6 +1219,21 @@ export default function ProjectManagement() {
           className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
         />
       </div>
+    );
+  };
+
+  const renderSubmissionLink = (project, className = "") => {
+    if (!project?.submissionLink) return null;
+    return (
+      <a
+        href={project.submissionLink}
+        target="_blank"
+        rel="noreferrer"
+        title="Open the staff member's submitted link to check their work"
+        className={`inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 ${className}`}
+      >
+        <ExternalLink size={12} /> Open submission
+      </a>
     );
   };
 
@@ -2264,6 +2297,7 @@ export default function ProjectManagement() {
                           {renderStatusDropdown(
                             project
                           )}
+                          {renderSubmissionLink(project, "mt-2")}
                         </td>
 
                         {/* Due */}
@@ -3028,6 +3062,26 @@ export default function ProjectManagement() {
 
                     </div>
 
+                  </div>
+                )}
+
+                {/* Submission for review */}
+
+                {selectedProject?.submissionLink && (
+                  <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="flex items-center gap-2 text-sm font-black text-indigo-800">
+                          <Send size={15} />
+                          {selectedProject.status === "Submitted" ? "Submitted for review" : "Submission"}
+                        </h3>
+                        <p className="mt-1 text-xs text-indigo-600">
+                          {selectedProject.submittedAt ? `Sent in ${formatDateTime(selectedProject.submittedAt)}. ` : ""}
+                          Open the link to check the staff member's work before marking it Completed.
+                        </p>
+                      </div>
+                      {renderSubmissionLink(selectedProject)}
+                    </div>
                   </div>
                 )}
 

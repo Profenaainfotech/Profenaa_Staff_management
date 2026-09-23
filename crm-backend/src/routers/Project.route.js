@@ -34,10 +34,11 @@ router.get("/leaderboard", anyAuth, c.getLeaderboard);
 router.get("/user/:userId", anyAuth, c.getUserProjects);
 router.get("/stats/:userId", anyAuth, c.getUserProjectStats);
 
-// staff take a project from the pool (optionally starting it), start it, finish it
+// staff take a project from the pool (optionally starting it), start it, submit it for review
 router.put("/self-assign/:projectId", anyAuth.userOnly, c.selfAssignProject);
 router.put("/start/:projectId", anyAuth.userOnly, c.startProject);
-// the person who holds it moves it forward; an admin can correct any status
+router.put("/submit/:projectId", anyAuth.userOnly, c.submitProject);
+// the person who holds it moves it forward (never straight to Completed); an admin can correct any status
 router.put("/update-status/:projectId", anyAuth, c.updateProjectStatus);
 
 // ---------------- admin: edit / delete one project ----------------

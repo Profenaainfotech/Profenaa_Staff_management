@@ -1,5 +1,5 @@
 // Staff dashboard: "Recent Projects" - the newest Internal and External projects, one per row.
-// Take one (optionally starting it straight away), start it, complete it. One at a time.
+// Take one (optionally starting it straight away), start it, submit a link for admin review.
 import React, { useMemo, useState } from "react";
 import { FolderKanban, PackageOpen } from "lucide-react";
 import { FlashBanner } from "./Flash";
@@ -52,7 +52,7 @@ export default function RecentProjects({ projects = [], pool: poolIn = [], loadi
 
   const take = (p, start) => run(p, () => projectRequest("user", "PUT", `/self-assign/${p._id}`, { json: { start } }));
   const startIt = (p) => run(p, () => projectRequest("user", "PUT", `/start/${p._id}`, { json: {} }));
-  const complete = (p) => run(p, () => projectRequest("user", "PUT", `/update-status/${p._id}`, { json: { status: "Completed" } }), "Project completed. Great work!");
+  const submitWork = (p, link) => run(p, () => projectRequest("user", "PUT", `/submit/${p._id}`, { json: { link } }), "Submitted for admin review.");
 
   return (
     <section aria-label="Recent projects">
@@ -89,7 +89,7 @@ export default function RecentProjects({ projects = [], pool: poolIn = [], loadi
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           {list.map((p) => (
-            <StaffProjectCard key={p._id} project={p} mine={projects.some((m) => m._id === p._id)} hasActive={Boolean(active)} busy={busyId === p._id} onTake={take} onStart={startIt} onComplete={complete} onOpen={setOpen} />
+            <StaffProjectCard key={p._id} project={p} mine={projects.some((m) => m._id === p._id)} hasActive={Boolean(active)} busy={busyId === p._id} onTake={take} onStart={startIt} onSubmit={submitWork} onOpen={setOpen} />
           ))}
         </div>
       )}

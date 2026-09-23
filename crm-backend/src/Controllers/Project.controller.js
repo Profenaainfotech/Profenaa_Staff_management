@@ -20,8 +20,8 @@ const notify = require("../Services/notification.service");
 const { ok, fail, handle, isObjectId, httpError } = require("../Utils/http");
 
 const TYPES = ["Internal", "External"];
-const STATUSES = ["Pending", "In Progress", "Completed"];
-const ACTIVE = ["Pending", "In Progress"]; // a person can hold only one of these at a time
+const STATUSES = ["Pending", "In Progress", "Submitted", "Completed"];
+const ACTIVE = ["Pending", "In Progress", "Submitted"]; // a person can hold only one of these at a time
 const MAX_IMAGES = 10;
 const UPLOAD_PREFIX = "/uploads/projects/";
 const UPLOAD_DIR = path.join(__dirname, "../../uploads/projects");
@@ -60,6 +60,20 @@ function parseDue(value, { mustBeFuture }) {
   if (Number.isNaN(d.getTime())) throw httpError(400, "The validity time is not a valid date.");
   if (mustBeFuture && d.getTime() < Date.now() + 60 * 1000) throw httpError(400, "The validity time must be in the future.");
   return d;
+}
+
+/** A submission link (GitHub, Drive, or any other web link) must be a real, well-formed http(s) address */
+function parseLink(value) {
+  const link = clean(value, 500);
+  if (!link) throw httpError(400, "Add a link (GitHub, Drive, or any other) to the work you completed.");
+  let url;
+  try {
+    url = new URL(link);
+  } catch {
+    throw httpError(400, "That does not look like a valid link. Include the full address, e.g. https://...");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw httpError(400, "The link must start with http:// or https://");
+  return link;
 }
 
 /** Validate the text fields shared by create and edit */
@@ -331,7 +345,7 @@ async function acquireSlot(userId) {
       if (err.code !== 11000) throw err;
     }
     const busy = await Project.findOne({ assignedTo: userId, status: { $in: ACTIVE } }).select("title");
-    if (busy) throw httpError(400, `You already have an active project ("${busy.title}"). Complete it before taking another one.`);
+    if (busy) throw httpError(400, `You already have an active project ("${busy.title}"). Finish it (or wait for admin approval) before taking another one.`);
     const slot = await ProjectSlot.findOne({ userId });
     if (slot && Date.now() - new Date(slot.createdAt).getTime() > STALE_CLAIM_MS) {
       await ProjectSlot.deleteOne({ _id: slot._id });
@@ -390,7 +404,7 @@ const selfAssignProject = handle(async (req, res) => {
 
   const busy = await Project.findOne({ assignedTo: user._id, status: { $in: ACTIVE } }).select("title status");
   if (busy) {
-    return fail(res, 400, `You already have an active project ("${busy.title}"). Complete it before taking another one.`, { activeProject: busy });
+    return fail(res, 400, `You already have an active project ("${busy.title}"). Finish it (or wait for admin approval) before taking another one.`, { activeProject: busy });
   }
 
   const start = req.body?.start === true || req.body?.start === "true";
@@ -465,7 +479,44 @@ const startProject = handle(async (req, res) => {
 });
 
 // =====================================================================
-// STATUS  (the person who holds it: forward only; an admin can correct anything)
+// SUBMIT FOR REVIEW  (the person who holds it)
+//
+// Staff no longer mark their own project Completed. Instead they submit a link to their
+// work (GitHub, Drive, or anything else); an admin opens it, checks it, and only the admin
+// can then mark the project Completed (or send it back for changes).
+// =====================================================================
+const submitProject = handle(async (req, res) => {
+  const { projectId } = req.params;
+  if (!isObjectId(projectId)) throw httpError(400, "Invalid project.");
+  const project = await Project.findById(projectId);
+  if (!project) throw httpError(404, "Project not found.");
+  if (!project.assignedTo || String(project.assignedTo) !== String(req.actor.id)) throw httpError(403, "You are not authorized to submit this project.");
+  if (project.status === "Completed") throw httpError(400, "This project is already completed.");
+  if (project.status === "Submitted") throw httpError(400, "This project is already submitted and waiting for admin review.");
+  if (project.status !== "In Progress") throw httpError(400, "Start working on the project before submitting it.");
+
+  const link = parseLink(req.body?.link);
+  project.status = "Submitted";
+  project.submissionLink = link;
+  project.submittedAt = new Date();
+  await project.save();
+
+  notify.notifyAdmins({
+    category: "project",
+    type: "PROJECT_SUBMITTED",
+    severity: "info",
+    title: `${project.assignedToName || "Someone"} submitted work for review`,
+    message: project.title,
+    link: "Projects",
+  });
+
+  await project.populate("assignedTo", POPULATE);
+  return ok(res, { message: "Submitted for admin review. You will be told once it is checked.", project });
+});
+
+// =====================================================================
+// STATUS  (the person who holds it: forward only, and never straight to
+// Completed - that needs an admin's approval; an admin can correct anything)
 // =====================================================================
 const updateProjectStatus = handle(async (req, res) => {
   const { projectId } = req.params;
@@ -485,7 +536,9 @@ const updateProjectStatus = handle(async (req, res) => {
   if (from === status) return ok(res, { message: "Project status updated successfully.", project });
 
   if (!admin) {
-    const forward = (from === "Pending" && (status === "In Progress" || status === "Completed")) || (from === "In Progress" && status === "Completed");
+    if (status === "Submitted") throw httpError(400, "Submit your work with a link, so an admin can review it.");
+    if (status === "Completed") throw httpError(400, "Only an admin can mark a project completed, after reviewing your submission.");
+    const forward = from === "Pending" && status === "In Progress";
     if (!forward) throw httpError(400, `A project cannot go back from ${from} to ${status}. Ask an administrator.`);
   }
 
@@ -498,27 +551,46 @@ const updateProjectStatus = handle(async (req, res) => {
   }
 
   if (status === "Completed") {
+    // "On time" is judged by when the staff member actually finished (submitted), not by
+    // how quickly the admin got round to approving it.
+    const finishedAt = from === "Submitted" && project.submittedAt ? new Date(project.submittedAt) : now;
     project.completedAt = now;
-    project.completedOnTime = project.dueDate ? now.getTime() <= new Date(project.dueDate).getTime() : null;
-    project.completionMinutes = Math.max(0, Math.round((now.getTime() - new Date(project.startedAt).getTime()) / 60000));
+    project.completedOnTime = project.dueDate ? finishedAt.getTime() <= new Date(project.dueDate).getTime() : null;
+    project.completionMinutes = Math.max(0, Math.round((finishedAt.getTime() - new Date(project.startedAt).getTime()) / 60000));
   } else {
     // moved out of Completed by an administrator: the result no longer counts
     project.completedAt = null;
     project.completedOnTime = null;
     project.completionMinutes = null;
   }
+
+  // sent back from Submitted without approving it: clear the old link, the resubmission must be fresh
+  const sentBack = from === "Submitted" && status !== "Completed";
+  if (sentBack) {
+    project.submissionLink = "";
+    project.submittedAt = null;
+  }
+
   await project.save();
   if (status === "Completed") await releaseSlot(project.assignedTo);
 
-  if (status === "Completed") {
-    notify.notifyAdmins({
+  if (status === "Completed" && project.assignedTo) {
+    notify.notifyUser(project.assignedTo, {
       category: "project",
-      type: "PROJECT_COMPLETED",
+      type: "PROJECT_APPROVED",
       severity: project.completedOnTime === false ? "warning" : "success",
-      title: `${project.assignedToName || "Someone"} completed a project`,
-      message: `${project.title} - ${project.completedOnTime === false ? "after the validity time" : "on time"}`,
-      link: "Projects",
-      dedupeKey: `proj-done:${project._id}`,
+      title: "Your submission was approved",
+      message: `${project.title} - ${project.completedOnTime === false ? "marked completed (after the validity time)" : "marked completed on time"}.`,
+      link: "My Projects",
+    });
+  } else if (sentBack && project.assignedTo) {
+    notify.notifyUser(project.assignedTo, {
+      category: "project",
+      type: "PROJECT_SENT_BACK",
+      severity: "warning",
+      title: "Your submission needs changes",
+      message: `${project.title} - please review it and submit again.`,
+      link: "My Projects",
     });
   }
   await project.populate("assignedTo", POPULATE);
@@ -539,6 +611,7 @@ const getUserProjectStats = handle(async (req, res) => {
       total: projects.length,
       pending: count((p) => p.status === "Pending"),
       inProgress: count((p) => p.status === "In Progress"),
+      submitted: count((p) => p.status === "Submitted"),
       completed: count((p) => p.status === "Completed"),
       onTime: count((p) => p.status === "Completed" && p.completedOnTime !== false),
       late: count((p) => p.status === "Completed" && p.completedOnTime === false),
@@ -580,10 +653,11 @@ const getLeaderboard = handle(async (req, res) => {
     staff.map((u) => [String(u._id), { userId: u._id, name: u.name, role: u.role || "", assigned: 0, active: 0, completed: 0, onTime: 0, late: 0, minutes: 0, timed: 0 }])
   );
   const now = Date.now();
-  const team = { total: projects.length, available: 0, pending: 0, inProgress: 0, completed: 0, overdue: 0 };
+  const team = { total: projects.length, available: 0, pending: 0, inProgress: 0, submitted: 0, completed: 0, overdue: 0 };
 
   for (const p of projects) {
     if (p.status === "Completed") team.completed += 1;
+    else if (p.status === "Submitted") team.submitted += 1;
     else if (p.status === "In Progress") team.inProgress += 1;
     else if (p.assignedTo) team.pending += 1;
     else team.available += 1;
@@ -643,6 +717,7 @@ module.exports = {
   getProjectPool,
   selfAssignProject,
   startProject,
+  submitProject,
   updateProjectStatus,
   getUserProjectStats,
   getLeaderboard,

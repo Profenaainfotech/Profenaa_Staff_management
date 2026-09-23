@@ -90,6 +90,18 @@ export const fmtMinutes = (min) => {
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 };
 
+/** A quick client-side check that a submission link looks like a real http(s) address */
+export function isValidLink(value) {
+  const link = String(value || "").trim();
+  if (!link) return false;
+  try {
+    const url = new URL(link);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export const TYPE_STYLE = {
   Internal: "bg-blue-50 text-blue-700 border-blue-200",
   External: "bg-violet-50 text-violet-700 border-violet-200",
@@ -97,5 +109,6 @@ export const TYPE_STYLE = {
 export const STATUS_STYLE = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",
   "In Progress": "bg-sky-50 text-sky-700 border-sky-200",
+  Submitted: "bg-indigo-50 text-indigo-700 border-indigo-200",
   Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
