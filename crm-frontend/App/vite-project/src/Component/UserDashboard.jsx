@@ -45,11 +45,12 @@ import RecentProjects from "./projects/RecentProjects";
 import ProjectLeaderboard from "./projects/ProjectLeaderboard";
 import ProjectExtras from "./projects/ProjectExtras";
 import SidebarScroll from "./SidebarScroll";
+import { API_ORIGIN } from "../lib/api";
 import { CalendarOff as LeavesNavIcon, ClipboardList as ReportNavIcon } from "lucide-react";
 
-const TASK_API_URL = "http://localhost:8000/api/Task";
-const USER_API_URL = "http://localhost:8000/api/UserAccounts";
-const PROJECT_API_URL = "http://localhost:8000/api/Project";
+const TASK_API_URL = `${API_ORIGIN}/api/Task`;
+const USER_API_URL = `${API_ORIGIN}/api/UserAccounts`;
+const PROJECT_API_URL = `${API_ORIGIN}/api/Project`;
 
 // The project API needs the logged-in staff member's token on every call
 const projectAuth = () => ({
@@ -2242,7 +2243,7 @@ export default function UserDashboard() {
                       const imageUrl = image
                         ? image.startsWith("http")
                           ? image
-                          : `http://localhost:8000${
+                          : `${API_ORIGIN}${
                               image.startsWith("/")
                                 ? image
                                 : `/uploads/projects/${image}`
@@ -2494,7 +2495,7 @@ export default function UserDashboard() {
                       const imageUrl = image
                         ? image.startsWith("http")
                           ? image
-                          : `http://localhost:8000${
+                          : `${API_ORIGIN}${
                               image.startsWith("/")
                                 ? image
                                 : `/uploads/projects/${image}`

@@ -76,6 +76,7 @@ import AdminDailyReports from "./wifi/AdminDailyReports";
 import OvertimePanel from "./wifi/OvertimePanel";
 import ProjectLeaderboard from "./projects/ProjectLeaderboard";
 import SidebarScroll from "./SidebarScroll";
+import { API_ORIGIN } from "../lib/api";
 import {
   Wifi as WifiNavIcon,
   Contact as StaffNavIcon,
@@ -87,11 +88,9 @@ import {
    API
 ========================================================= */
 
-const USER_API_URL =
-  "http://localhost:8000/api/UserAccounts";
+const USER_API_URL = `${API_ORIGIN}/api/UserAccounts`;
 
-const TASK_API_URL =
-  "http://localhost:8000/api/Task";
+const TASK_API_URL = `${API_ORIGIN}/api/Task`;
 
 /* =========================================================
    CONFIGURATION

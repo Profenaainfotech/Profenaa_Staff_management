@@ -1,5 +1,6 @@
 
 import React, { useEffect, useMemo, useState } from "react";
+import { API_ORIGIN } from "../lib/api";
 import {
   CalendarDays,
   Clock3,
@@ -29,8 +30,8 @@ import {
   UserX,
 } from "lucide-react";
 
-const ATTENDANCE_API = "http://localhost:8000/api/attendance";
-const USER_API = "http://localhost:8000/api/UserAccounts";
+const ATTENDANCE_API = `${API_ORIGIN}/api/attendance`;
+const USER_API = `${API_ORIGIN}/api/UserAccounts`;
 
 const ACTIVE_THRESHOLD = 2 * 60 * 1000; // 2 minutes
 const REFRESH_INTERVAL = 15000; // 15 seconds

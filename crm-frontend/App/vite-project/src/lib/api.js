@@ -2,7 +2,7 @@
 // The existing screens keep calling the backend the way they always did.
 //
 // Base URL: VITE_API_URL if set, otherwise the same http://localhost:8000 the rest of the app uses.
-export const API_ORIGIN = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+export const API_ORIGIN = (import.meta.env.VITE_API_URL || "https://api-staffmang.profenaainfotech.com").replace(/\/+$/, "");
 
 export class ApiError extends Error {
   constructor(message, status) {

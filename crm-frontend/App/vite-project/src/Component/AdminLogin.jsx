@@ -12,6 +12,7 @@ import {
   Building2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { API_ORIGIN } from "../lib/api";
 
 export default function AdminLogin() {
   const navigate = useNavigate();
@@ -45,7 +46,7 @@ export default function AdminLogin() {
 
     try {
       const response = await fetch(
-        "http://localhost:8000/api/admin/login",
+        `${API_ORIGIN}/api/admin/login`,
         {
           method: "POST",
 

@@ -140,7 +140,6 @@ async function run() {
   await bad({ issueDetails: "" }, 0, /error or change/i, "the error / change field is required");
   await bad({ issueDetails: "no" }, 0, /at least 5/i, "the error / change field needs a real sentence");
   await bad({ description: "short" }, 0, /description is required/i, "description too short");
-  await bad({ dueDate: "" }, 0, /validity time/i, "validity time is required");
   await bad({ dueDate: "not-a-date" }, 0, /not a valid date/i, "validity time must be a date");
   await bad({ dueDate: new Date(Date.now() - 3600 * 1000).toISOString() }, 0, /in the future/i, "validity time cannot be in the past");
   await bad({ projectType: "Random" }, 0, /Internal or External/i, "unknown type");
@@ -202,6 +201,20 @@ async function run() {
   r = await call("GET", `${P}/user/${B._id}`, { token: admin });
   check("an admin can see anyone's", r.status === 200 && r.body.projects.length === 1);
 
+  // ================================================== VALIDITY TIME IS OPTIONAL
+  section("Validity time is optional");
+  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "No validity A", dueDate: undefined })) });
+  check("creating with no dueDate field at all succeeds, with no validity time set", r.status === 201 && r.body.project.dueDate === null, r.body);
+  const noValidityId1 = r.body.project._id;
+  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "No validity B", dueDate: "" })) });
+  check("...and an empty dueDate behaves the same way", r.status === 201 && r.body.project.dueDate === null, r.body);
+  const noValidityId2 = r.body.project._id;
+  r = await call("GET", `${P}/leaderboard`, { token: admin });
+  check("a project with no due date counts as available, never overdue", r.body.team.available >= 2 && r.body.team.overdue === 0, r.body.team);
+  // clean up: the exact project counts the next section checks must not include these two
+  await call("DELETE", `${P}/${noValidityId1}`, { token: admin });
+  await call("DELETE", `${P}/${noValidityId2}`, { token: admin });
+
   // ================================================== EDIT
   section("Edit (admin)");
   r = await call("PUT", `${P}/${I1._id}`, { token: tA, form: makeForm(good()) });
@@ -237,6 +250,14 @@ async function run() {
   check("edit can assign a pool project to a person", r.status === 200 && r.body.project.assignedToName === "Karthik" && r.body.project.assignmentType === "Admin", r.body);
   r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm({ ...good({ title: "External client work", projectType: "External" }), dueDate: E1.dueDate, assignedTo: "" }) });
   check("...and back to the pool", r.status === 200 && r.body.project.assignedTo === null && r.body.project.assignmentType === "Pool", r.body);
+
+  const beforeDue = E1.dueDate;
+  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External", dueDate: undefined })) });
+  check("edit without sending dueDate at all leaves the existing validity time unchanged", r.status === 200 && new Date(r.body.project.dueDate).toISOString() === new Date(beforeDue).toISOString(), r.body);
+  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External", dueDate: "" })) });
+  check("edit with an empty dueDate clears the validity time", r.status === 200 && r.body.project.dueDate === null, r.body);
+  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External", dueDate: undefined })) });
+  check("...and it stays cleared when the field is left out afterwards too", r.status === 200 && r.body.project.dueDate === null, r.body);
 
   // ================================================== TAKE A PROJECT
   section("Staff take a project (one at a time)");

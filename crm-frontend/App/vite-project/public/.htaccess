@@ -1,0 +1,32 @@
+# ============================================================
+# Profenaa Staff CRM - frontend .htaccess
+# Fixes "404 on refresh" for the React app (React Router routes
+# like /admin/dashboard and /User/dashboard only exist in the
+# browser, not as real files on the server).
+#
+# Place this file in the SAME folder as index.html on the server
+# (the folder the "hr" subdomain points to).
+# ============================================================
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Let real files and folders load normally: JS/CSS/images in
+  # /assets, favicon.svg, icons.svg, index.html itself, etc.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Every other route (this app's and any added later - /admin/*,
+  # /User/*, /login, /adminlogin, and so on) gets index.html, so
+  # React Router can take over and show the right page.
+  RewriteRule ^ /index.html [L]
+</IfModule>
+
+# If mod_rewrite is not enabled on the server, this line makes
+# a direct hit on an unknown route show the app instead of a
+# blank Apache error page (not a perfect fix, but a safe fallback).
+<IfModule !mod_rewrite.c>
+  ErrorDocument 404 /index.html
+</IfModule>

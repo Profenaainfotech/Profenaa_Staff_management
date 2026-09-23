@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_ORIGIN } from "../lib/api";
 import {
   Lock,
   User,
@@ -45,7 +46,7 @@ export default function UserLogin() {
 
     try {
       const response = await fetch(
-        "http://localhost:8000/api/UserAccounts/Log-in",
+        `${API_ORIGIN}/api/UserAccounts/Log-in`,
         {
           method: "POST",
 

@@ -28,14 +28,11 @@ import {
   ClipboardList,
   TrendingUp,
   PackageOpen,
-  LayoutGrid,
-  List,
   ArrowUpDown,
   RotateCcw,
   Copy,
   ExternalLink,
   Check,
-  Timer,
   CalendarCheck,
   CalendarClock,
   BarChart3,
@@ -55,19 +52,17 @@ import {
   projectImages,
   projectRequest,
 } from "./projects/projectApi";
+import { API_ORIGIN } from "../lib/api";
 
 /* =========================================================
    API CONFIGURATION
 ========================================================= */
 
-const PROJECT_API_URL =
-  "http://localhost:8000/api/Project";
+const PROJECT_API_URL = `${API_ORIGIN}/api/Project`;
 
-const USER_API_URL =
-  "http://localhost:8000/api/UserAccounts";
+const USER_API_URL = `${API_ORIGIN}/api/UserAccounts`;
 
-const SERVER_URL =
-  "http://localhost:8000";
+const SERVER_URL = API_ORIGIN;
 
 /* =========================================================
    HELPERS FOR THE INTERNAL / EXTERNAL HEADINGS AND LOGIN
@@ -444,11 +439,6 @@ export default function ProjectManagement() {
 
   const [sortBy, setSortBy] =
     useState("newest");
-
-  /* View */
-
-  const [viewMode, setViewMode] =
-    useState("grid");
 
   /* Notifications */
 
@@ -1798,44 +1788,6 @@ export default function ProjectManagement() {
 
           </div>
 
-          {/* View */}
-
-          <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
-
-            <button
-              type="button"
-              onClick={() =>
-                setViewMode("grid")
-              }
-              className={`p-2 rounded-lg transition ${
-                viewMode === "grid"
-                  ? "bg-white text-blue-600 shadow-sm"
-                  : "text-slate-400"
-              }`}
-              title="Grid view"
-            >
-              <LayoutGrid
-                size={18}
-              />
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                setViewMode("list")
-              }
-              className={`p-2 rounded-lg transition ${
-                viewMode === "list"
-                  ? "bg-white text-blue-600 shadow-sm"
-                  : "text-slate-400"
-              }`}
-              title="List view"
-            >
-              <List size={18} />
-            </button>
-
-          </div>
-
         </div>
 
         {/* =================================================
@@ -2136,350 +2088,6 @@ export default function ProjectManagement() {
             </button>
 
           </div>
-
-        </div>
-      ) : viewMode === "grid" ? (
-
-        /* =================================================
-           GRID VIEW
-        ================================================= */
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-
-          {filteredProjects.map(
-            (project) => {
-              const image =
-                getProjectImage(
-                  project
-                );
-
-              const status =
-                getProjectStatus(
-                  project
-                );
-
-              const overdue =
-                isOverdue(
-                  project
-                );
-
-              const dueSoon =
-                isDueSoon(
-                  project
-                );
-
-              const projectId =
-                getProjectId(
-                  project
-                );
-
-              const progress =
-                getProgress(
-                  project
-                );
-
-              return (
-                <div
-                  key={projectId}
-                  className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-200"
-                >
-
-                  {/* Image */}
-
-                  <div className="relative h-48 bg-slate-100 overflow-hidden">
-
-                    {image ? (
-                      <>
-                        <img
-                          src={image}
-                          alt={getProjectName(
-                            project
-                          )}
-                          className="w-full h-full object-cover"
-                          onError={(
-                            e
-                          ) => {
-                            e.currentTarget.style.display =
-                              "none";
-
-                            const fallback =
-                              e.currentTarget.parentElement?.querySelector(
-                                ".card-image-fallback"
-                              );
-
-                            if (
-                              fallback
-                            ) {
-                              fallback.classList.remove(
-                                "hidden"
-                              );
-                            }
-                          }}
-                        />
-
-                        <div className="card-image-fallback hidden absolute inset-0 flex-col items-center justify-center bg-slate-100 text-slate-400">
-                          <ImageIcon
-                            size={38}
-                          />
-
-                          <span className="text-xs mt-2 font-semibold">
-                            Image unavailable
-                          </span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                        <ImageIcon
-                          size={40}
-                        />
-
-                        <span className="text-xs mt-2 font-semibold">
-                          No project image
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Status */}
-
-                    <div className="absolute top-3 left-3">
-
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-black backdrop-blur-sm ${getStatusClasses(
-                          status
-                        )}`}
-                      >
-                        {getStatusIcon(
-                          status
-                        )}
-
-                        {status}
-                      </span>
-
-                    </div>
-
-                    {/* Type */}
-                    <div className="absolute bottom-3 left-3">
-                      <span
-                        className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-black ${TYPE_STYLE[typeOf(project)]}`}
-                      >
-                        {typeOf(project)}
-                      </span>
-                    </div>
-                    {/* Due badge */}
-
-                    {overdue ? (
-                      <div className="absolute top-3 right-3">
-
-                        <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-600 text-white text-[11px] font-black shadow-lg">
-                          <AlertCircle
-                            size={13}
-                          />
-
-                          Overdue
-                        </span>
-
-                      </div>
-                    ) : dueSoon ? (
-                      <div className="absolute top-3 right-3">
-
-                        <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-orange-500 text-white text-[11px] font-black shadow-lg">
-                          <Timer
-                            size={13}
-                          />
-
-                          Due Soon
-                        </span>
-
-                      </div>
-                    ) : null}
-
-                  </div>
-
-                  {/* Content */}
-
-                  <div className="p-5">
-
-                    <div className="flex items-start justify-between gap-3">
-
-                      <div className="min-w-0">
-
-                        <h3 className="font-black text-lg text-slate-800 truncate">
-                          {getProjectName(
-                            project
-                          )}
-                        </h3>
-
-                        <p className="text-xs text-slate-400 mt-1">
-                          ID:{" "}
-                          {String(
-                            projectId
-                          ).slice(-8)}
-                        </p>
-
-                      </div>
-
-                    </div>
-
-                    <p className="mt-3 text-sm text-slate-500 line-clamp-3 min-h-[60px]">
-                      {getProjectDescription(
-                        project
-                      )}
-                    </p>
-
-                    {project?.issueDetails && (
-                      <p className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                        <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                        <span className="line-clamp-2">{project.issueDetails}</span>
-                      </p>
-                    )}
-                    {/* Assignment */}
-
-                    <div className="mt-4 flex items-center gap-3 p-3 rounded-xl bg-slate-50">
-
-                      <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center">
-
-                        {project?.assignedTo ? (
-                          <UserRound
-                            size={17}
-                            className="text-blue-600"
-                          />
-                        ) : (
-                          <Layers
-                            size={17}
-                            className="text-purple-600"
-                          />
-                        )}
-
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-
-                        <p className="text-[10px] uppercase tracking-wider font-black text-slate-400">
-                          Assigned To
-                        </p>
-
-                        <p className="text-sm font-bold text-slate-700 truncate">
-                          {getAssignedUserName(
-                            project
-                          )}
-                        </p>
-
-                      </div>
-
-                    </div>
-
-                    {/* Due date */}
-
-                    <div className="mt-3 flex items-center justify-between gap-2">
-
-                      <div
-                        className={`flex items-center gap-2 ${
-                          overdue
-                            ? "text-red-600"
-                            : dueSoon
-                            ? "text-orange-600"
-                            : "text-slate-500"
-                        }`}
-                      >
-                        <CalendarDays
-                          size={16}
-                        />
-
-                        <span className="text-xs font-semibold">
-                          {formatDate(
-                            project?.dueDate
-                          )}
-                        </span>
-                      </div>
-
-                      {project?.assignmentType && (
-                        <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">
-                          {
-                            project.assignmentType
-                          }
-                        </span>
-                      )}
-
-                    </div>
-
-                    {/* Progress */}
-
-                    <div className="mt-4">
-
-                      <div className="flex items-center justify-between mb-1.5">
-
-                        <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">
-                          Progress
-                        </span>
-
-                        <span className="text-xs font-black text-slate-600">
-                          {progress}%
-                        </span>
-
-                      </div>
-
-                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-
-                        <div
-                          className={`h-full rounded-full transition-all ${getProgressClasses(
-                            project
-                          )}`}
-                          style={{
-                            width: `${progress}%`,
-                          }}
-                        />
-
-                      </div>
-
-                    </div>
-
-                    {/* Actions */}
-
-                    <div className="mt-5 flex gap-2">
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          openDetails(
-                            project
-                          )
-                        }
-                        className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-sm hover:bg-slate-50 transition"
-                      >
-                        <Eye
-                          size={17}
-                        />
-
-                        View
-                      </button>
-
-                      {renderStatusDropdown(
-                        project
-                      )}
-
-                    </div>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(project)}
-                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                      >
-                        <Pencil size={15} /> Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => askDelete(project)}
-                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50"
-                      >
-                        <Trash2 size={15} /> Delete
-                      </button>
-                    </div>
-
-                  </div>
-                </div>
-              );
-            }
-          )}
 
         </div>
       ) : (

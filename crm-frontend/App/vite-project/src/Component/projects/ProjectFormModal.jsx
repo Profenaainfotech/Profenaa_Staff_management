@@ -2,7 +2,7 @@
 //
 // Fields, in this order:
 //   1 Project title *          2 Error / change required *      3 Description *
-//   4 Images (optional, up to 10)     5 Assign to (optional)      6 Validity time *
+//   4 Images (optional, up to 10)     5 Assign to (optional)      6 Validity time (optional)
 // ...then a Project Summary that shows exactly what will be created.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, Image as ImageIcon, Layers, Loader2, Plus, Save, Target, Trash2, Upload, UserRound, X } from "lucide-react";
@@ -21,8 +21,9 @@ const PRESETS = [
   ["30", "30 days"],
 ];
 
-/** The moment the project stops being valid, from what is chosen in the form */
+/** The moment the project stops being valid, from what is chosen in the form. null = no validity time (optional). */
 function dueFrom(validity, customDue, project) {
+  if (validity === "none") return null;
   if (validity === "keep") return project?.dueDate ? new Date(project.dueDate) : null;
   if (validity === "custom") {
     const d = new Date(customDue);
@@ -67,7 +68,7 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
     issueDetails: project?.issueDetails || "",
     description: project?.description || "",
     assignedTo: project?.assignedTo?._id || (typeof project?.assignedTo === "string" ? project.assignedTo : "") || "",
-    validity: editing ? "keep" : "7",
+    validity: editing ? "keep" : "none",
     customDue: toLocalInput(daysFromNow(7)),
   }));
   const [kept, setKept] = useState(() => (editing ? projectImages(project) : [])); // stored images still on the project
@@ -147,9 +148,11 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
     else if (t.length > 120) e.title = "Project title is too long (maximum 120 characters).";
     if (f.issueDetails.trim().length < 5) e.issueDetails = "Describe the error or change that has to be made (at least 5 characters).";
     if (f.description.trim().length < 10) e.description = "Project description is required (at least 10 characters).";
-    const d = dueFrom(f.validity, f.customDue, project);
-    if (!d) e.validity = "Choose the validity time.";
-    else if (f.validity !== "keep" && d.getTime() < Date.now() + 60 * 1000) e.validity = "The validity time must be in the future.";
+    if (f.validity === "custom") {
+      const d = dueFrom(f.validity, f.customDue, project);
+      if (!d) e.validity = 'Choose a date and time, or pick "No validity time".';
+      else if (d.getTime() < Date.now() + 60 * 1000) e.validity = "The validity time must be in the future.";
+    }
     return e;
   };
 
@@ -174,7 +177,8 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
       fd.append("issueDetails", f.issueDetails.trim());
       fd.append("description", f.description.trim());
       fd.append("projectType", type);
-      fd.append("dueDate", dueFrom(f.validity, f.customDue, project).toISOString());
+      const dueDate = dueFrom(f.validity, f.customDue, project);
+      fd.append("dueDate", dueDate ? dueDate.toISOString() : "");
       if (editing) {
         if (!assignmentLocked) fd.append("assignedTo", f.assignedTo || "");
         fd.append("removeImages", JSON.stringify(removed));
@@ -301,10 +305,11 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
             </select>
           </Step>
 
-          <Step n={6} label="Validity time" required htmlFor="pf-validity" error={errors.validity} hint="How long the project stays valid. Staff who finish before it ends score on-time points.">
+          <Step n={6} label="Validity time" htmlFor="pf-validity" error={errors.validity} hint={'Optional. Leave as "No validity time" if there is no deadline. When set, staff who finish before it ends score on-time points.'}>
             <div className="grid gap-3 sm:grid-cols-2">
               <select id="pf-validity" ref={validityRef} value={f.validity} onChange={set("validity")} aria-invalid={Boolean(errors.validity)} className={fieldCls(errors.validity)}>
                 {editing && <option value="keep">Keep current ({fmtDateTime(project?.dueDate)})</option>}
+                <option value="none">No validity time</option>
                 {PRESETS.map(([v, label]) => (
                   <option key={v} value={v}>{label} from now</option>
                 ))}

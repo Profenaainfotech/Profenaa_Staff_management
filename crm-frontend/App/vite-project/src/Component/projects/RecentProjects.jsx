@@ -1,4 +1,4 @@
-// Staff dashboard: "Recent Projects" - the newest Internal and External projects as cards.
+// Staff dashboard: "Recent Projects" - the newest Internal and External projects, one per row.
 // Take one (optionally starting it straight away), start it, complete it. One at a time.
 import React, { useMemo, useState } from "react";
 import { FolderKanban, PackageOpen } from "lucide-react";
@@ -87,7 +87,7 @@ export default function RecentProjects({ projects = [], pool: poolIn = [], loadi
           <p className="mt-1 text-xs text-slate-400">New projects created by the administrator appear here.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           {list.map((p) => (
             <StaffProjectCard key={p._id} project={p} mine={projects.some((m) => m._id === p._id)} hasActive={Boolean(active)} busy={busyId === p._id} onTake={take} onStart={startIt} onComplete={complete} onOpen={setOpen} />
           ))}

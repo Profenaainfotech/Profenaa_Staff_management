@@ -4,6 +4,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { API_ORIGIN } from "../lib/api";
 
 import {
   Activity,
@@ -34,11 +35,9 @@ import {
   Target,
 } from "lucide-react";
 
-const ATTENDANCE_API =
-  "http://localhost:8000/api/attendance";
+const ATTENDANCE_API = `${API_ORIGIN}/api/attendance`;
 
-const USER_API =
-  "http://localhost:8000/api/UserAccounts";
+const USER_API = `${API_ORIGIN}/api/UserAccounts`;
 
 const ACTIVE_THRESHOLD = 2 * 60 * 1000;
 

@@ -53,8 +53,9 @@ function uploadedPaths(req) {
 /** All images of a project as one list (the cover is always the first one) */
 const imageList = (project) => [...new Set([project.cardImage, ...(project.images || [])].filter(Boolean))];
 
+/** The validity time is optional: empty/absent simply means "no due date". A value that IS given must be a real date. */
 function parseDue(value, { mustBeFuture }) {
-  if (value === undefined || value === null || value === "") throw httpError(400, "Choose the validity time (how long the project stays valid).");
+  if (value === undefined || value === null || value === "") return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) throw httpError(400, "The validity time is not a valid date.");
   if (mustBeFuture && d.getTime() < Date.now() + 60 * 1000) throw httpError(400, "The validity time must be in the future.");
@@ -80,9 +81,14 @@ function readFields(body, { creating, current }) {
     projectType = rawType;
   }
 
+  // Optional: on create, no dueDate sent = no validity time. On edit, not sending the field at
+  // all leaves the existing due date untouched; sending it (even empty, to clear it) updates it.
   let dueDate = current?.dueDate || null;
-  const changed = body.dueDate !== undefined && (!current?.dueDate || new Date(body.dueDate).getTime() !== new Date(current.dueDate).getTime());
-  if (creating || changed || !dueDate) dueDate = parseDue(body.dueDate, { mustBeFuture: creating || changed });
+  if (creating) {
+    dueDate = parseDue(body.dueDate, { mustBeFuture: true });
+  } else if (body.dueDate !== undefined) {
+    dueDate = parseDue(body.dueDate, { mustBeFuture: true });
+  }
 
   return { title, issueDetails, description, projectType, dueDate };
 }
