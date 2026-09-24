@@ -34,7 +34,7 @@ router.delete("/:projectId", anyAuth.adminOnly, c.deleteProject);
 // ---------------- staff (and admin) ----------------
 // IMPORTANT: fixed paths must come BEFORE "/:projectId"
 router.get("/pool", anyAuth, c.getProjectPool);
-router.get("/technology-catalog", anyAuth, c.getTechnologyCatalog);
+router.get("/technology-catalog", anyAuth, c.getTechnologycatalog);
 router.get("/leaderboard", anyAuth, c.getLeaderboard);
 router.get("/user/:userId", anyAuth, c.getUserProjects);
 router.get("/stats/:userId", anyAuth, c.getUserProjectStats);
