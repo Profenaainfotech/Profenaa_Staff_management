@@ -27,7 +27,7 @@ const User = require("../Models/User.Model");
 const notify = require("../Services/notification.service");
 const { ok, fail, handle, isObjectId, httpError } = require("../Utils/http");
 const { dateKey } = require("../Utils/time");
-const catalog = require("../Utils/technologyCatalog");
+const catalog = require("../Utils/Technologycatalog");
 
 const TYPES = ["Internal", "External", "Technologies"];
 const MAX_IMAGES = 10;
@@ -232,10 +232,10 @@ const createProject = handle(async (req, res) => {
 //
 // A Technologies project is a title + one staff member + the work items the admin ticked
 // (each item belongs to a domain: Sales, Training, Marketing, Placement, HR, Social Media -
-// see Utils/technologyCatalog). Staff are always chosen up front, so it goes straight to
+// see Utils/Technologycatalog). Staff are always chosen up front, so it goes straight to
 // that person as a task; it never enters the pool.
 // =====================================================================
-const getTechnologyCatalog = handle(async (req, res) => ok(res, { domains: catalog.DOMAINS, items: catalog.ITEMS }));
+const getTechnologycatalog = handle(async (req, res) => ok(res, { domains: catalog.DOMAINS, items: catalog.ITEMS }));
 
 const createTechnologyProject = handle(async (req, res) => {
   const title = clean(req.body.title, 200);
@@ -659,7 +659,7 @@ const getLeaderboard = handle(async (req, res) => {
 module.exports = {
   createProject,
   createTechnologyProject,
-  getTechnologyCatalog,
+  getTechnologycatalog,
   updateProject,
   deleteProject,
   getAllProjects,
