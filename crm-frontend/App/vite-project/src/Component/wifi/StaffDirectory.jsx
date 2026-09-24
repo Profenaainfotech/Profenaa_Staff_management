@@ -5,7 +5,10 @@ import { useAsync } from "../../lib/hooks";
 import { fmtTime } from "../../lib/format";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Stat, StatusBadge, Table, TextInput, Themed, useApi, useConfirm, useToast } from "./ui";
 
-const BLANK = { name: "", mobile: "", password: "", role: "", department: "", employeeCode: "", email: "", joiningDate: "", shiftStart: "09:30", shiftEnd: "18:30", branchId: "", attendanceMode: "" };
+const BLANK = { name: "", mobile: "", password: "", role: "", department: "", employeeCode: "", email: "", joiningDate: "", dateOfBirth: "", learningMode: "", shiftStart: "09:30", shiftEnd: "18:30", branchId: "", attendanceMode: "" };
+const LEARNING_MODES = ["Full Time", "Part Time", "Freelancer", "Intern"];
+const MODE_TONE = { "Full Time": "green", "Part Time": "blue", Freelancer: "violet", Intern: "amber" };
+const fmtDob = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "");
 
 function StaffModal({ person, branches, onClose, onDone }) {
   const api = useApi();
@@ -13,7 +16,7 @@ function StaffModal({ person, branches, onClose, onDone }) {
   const editing = Boolean(person);
   const [f, setF] = useState(
     editing
-      ? { ...BLANK, name: person.name, mobile: person.mobile, role: person.role || "", department: person.department || "", employeeCode: person.employeeCode || "", email: person.email || "", joiningDate: person.joiningDate || "", shiftStart: person.shift?.start || "09:30", shiftEnd: person.shift?.end || "18:30", branchId: person.branch?.id || "", attendanceMode: person.mode }
+      ? { ...BLANK, name: person.name, mobile: person.mobile, role: person.role || "", department: person.department || "", employeeCode: person.employeeCode || "", email: person.email || "", joiningDate: person.joiningDate || "", dateOfBirth: person.dateOfBirth || "", learningMode: person.learningMode || "", shiftStart: person.shift?.start || "09:30", shiftEnd: person.shift?.end || "18:30", branchId: person.branch?.id || "", attendanceMode: person.mode }
       : BLANK
   );
   const [busy, setBusy] = useState(false);
@@ -52,6 +55,13 @@ function StaffModal({ person, branches, onClose, onDone }) {
         <Field label="Employee code"><TextInput value={f.employeeCode} onChange={set("employeeCode")} /></Field>
         <Field label="Email"><TextInput type="email" value={f.email} onChange={set("email")} /></Field>
         <Field label="Joining date" hint="No absences are counted before this date"><TextInput type="date" value={f.joiningDate} onChange={set("joiningDate")} /></Field>
+        <Field label="Date of birth"><TextInput type="date" value={f.dateOfBirth} max={new Date().toISOString().slice(0, 10)} onChange={set("dateOfBirth")} /></Field>
+        <Field label="Mode of learning">
+          <Select value={f.learningMode} onChange={set("learningMode")}>
+            <option value="">Not set</option>
+            {LEARNING_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+          </Select>
+        </Field>
         <Field label="Shift start"><TextInput type="time" value={f.shiftStart} onChange={set("shiftStart")} /></Field>
         <Field label="Shift end"><TextInput type="time" value={f.shiftEnd} onChange={set("shiftEnd")} /></Field>
         <Field label="Branch"><Select value={f.branchId} onChange={set("branchId")}><option value="">No branch</option>{branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}</Select></Field>
@@ -128,13 +138,14 @@ function Body({ addSignal = 0 }) {
   const [branchId, setBranchId] = useState("");
   const [mode, setMode] = useState("");
   const [status, setStatus] = useState("active");
+  const [learningMode, setLearningMode] = useState("");
   const [selected, setSelected] = useState(new Set());
   const [modal, setModal] = useState(null); // {type:'edit'|'new'|'bulk'|'pw', person}
   // the dashboard header's "Create Staff" button opens this same form
   useEffect(() => { if (addSignal) setModal({ type: "new" }); }, [addSignal]);
 
   const branches = useAsync(() => api.get("/api/branches"), []);
-  const staff = useAsync(() => api.get("/api/staff", { branchId, mode, status }), [branchId, mode, status]);
+  const staff = useAsync(() => api.get("/api/staff", { branchId, mode, status, learningMode }), [branchId, mode, status, learningMode]);
   const all = useMemo(() => staff.data?.staff || [], [staff.data]);
   const rows = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -184,7 +195,7 @@ function Body({ addSignal = 0 }) {
       </div>
 
       <Card padded={false}>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-4 border-b border-slate-100">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-4 border-b border-slate-100">
           <div className="relative md:col-span-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
             <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search staff" className="!pl-9" />
@@ -192,6 +203,7 @@ function Body({ addSignal = 0 }) {
           <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">All branches</option>{branchList.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}</Select>
           <Select value={mode} onChange={(e) => setMode(e.target.value)}><option value="">Any attendance mode</option><option value="WIFI">Office Wi-Fi</option><option value="CRM_LOGIN">CRM login</option></Select>
           <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">Active</option><option value="inactive">Deactivated</option><option value="all">All</option></Select>
+          <Select value={learningMode} onChange={(e) => setLearningMode(e.target.value)}><option value="">Any mode of learning</option>{LEARNING_MODES.map((m) => <option key={m} value={m}>{m}</option>)}</Select>
         </div>
 
         {selected.size > 0 && (
@@ -205,7 +217,7 @@ function Body({ addSignal = 0 }) {
         {staff.loading && !staff.data ? <Spinner /> : rows.length === 0 ? (
           <Empty icon={<UsersRound size={20} />} title="No staff found" hint="Adjust the filters or add a staff member." />
         ) : (
-          <Table head={["", "Employee", "Contact", "Branch", "Attendance mode", "Shift", "Device", "Today", ""]} className="!border-0 !rounded-none">
+          <Table head={["", "Employee", "Contact", "Date of birth", "Mode of learning", "Branch", "Attendance mode", "Shift", "Device", "Today", ""]} className="!border-0 !rounded-none">
             {rows.map((p) => (
               <tr key={p.userId} className={p.isActive ? "" : "opacity-60"}>
                 <td className="px-4 py-3"><input type="checkbox" checked={selected.has(p.userId)} onChange={() => toggle(p.userId)} aria-label={`Select ${p.name}`} /></td>
@@ -214,6 +226,8 @@ function Body({ addSignal = 0 }) {
                   <p className="text-[10px] text-slate-400">{[p.role, p.department, p.employeeCode].filter(Boolean).join(" · ")}</p>
                 </td>
                 <td className="px-4 py-3 text-slate-600"><p>{p.mobile}</p><p className="text-[10px] text-slate-400">{p.email}</p></td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-600">{fmtDob(p.dateOfBirth) || <span className="text-slate-300">--</span>}</td>
+                <td className="px-4 py-3">{p.learningMode ? <Badge tone={MODE_TONE[p.learningMode] || "slate"}>{p.learningMode}</Badge> : <span className="text-slate-300">--</span>}</td>
                 <td className="px-4 py-3 text-slate-600">{p.branch?.name || <span className="text-slate-300">--</span>}</td>
                 <td className="px-4 py-3"><Badge tone={p.mode === "WIFI" ? "green" : "blue"}>{p.mode === "WIFI" ? "Office Wi-Fi" : "CRM login"}</Badge></td>
                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">{p.shift.start} – {p.shift.end}</td>

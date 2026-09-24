@@ -8,7 +8,7 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/scripts/seed.js",
     "enable-wifi": "node src/scripts/enable-wifi-mode.js",
-    "test": "node src/tests/utils.test.js && node src/tests/attendanceCore.test.js"
+    "test": "node src/tests/utils.test.js && node src/tests/attendanceCore.test.js && node src/tests/techWork.test.js"
   },
   "keywords": [],
   "author": "",

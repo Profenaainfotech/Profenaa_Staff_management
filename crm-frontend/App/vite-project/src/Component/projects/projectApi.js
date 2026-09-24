@@ -105,6 +105,25 @@ export function isValidLink(value) {
 export const TYPE_STYLE = {
   Internal: "bg-blue-50 text-blue-700 border-blue-200",
   External: "bg-violet-50 text-violet-700 border-violet-200",
+  Technologies: "bg-teal-50 text-teal-700 border-teal-200",
+};
+
+// Technologies projects: one colour per domain (soft for badges, solid for the selected filter chip)
+export const DOMAIN_STYLE = {
+  Sales: "bg-orange-50 text-orange-700 border-orange-200",
+  Training: "bg-sky-50 text-sky-700 border-sky-200",
+  Marketing: "bg-pink-50 text-pink-700 border-pink-200",
+  Placement: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  HR: "bg-rose-50 text-rose-700 border-rose-200",
+  "Social Media": "bg-cyan-50 text-cyan-700 border-cyan-200",
+};
+export const DOMAIN_SOLID = {
+  Sales: "bg-orange-500 border-orange-500 text-white",
+  Training: "bg-sky-500 border-sky-500 text-white",
+  Marketing: "bg-pink-500 border-pink-500 text-white",
+  Placement: "bg-indigo-500 border-indigo-500 text-white",
+  HR: "bg-rose-500 border-rose-500 text-white",
+  "Social Media": "bg-cyan-600 border-cyan-600 text-white",
 };
 export const STATUS_STYLE = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",

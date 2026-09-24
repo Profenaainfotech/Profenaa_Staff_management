@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { CalendarDays, CheckCircle2, ClipboardList, Clock, Eye, FilePenLine, Plus, Save, Send, Trash2, Wand2 } from "lucide-react";
 import { useAsync } from "../../lib/hooks";
 import { addDaysKey, fmtDay, fmtMinutes, fmtTime, istDateKey } from "../../lib/format";
+import { TechWorkCard, TechWorkView, pctText } from "./TechWorkCard";
 import { Badge, Button, Card, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Table, TextArea, TextInput, Themed, useApi, useConfirm, useToast } from "./ui";
 
 const CATEGORIES = ["Development", "Testing / QA", "Design", "Meeting", "Support", "Learning", "Documentation", "Admin / Other"];
@@ -56,6 +57,8 @@ function ReportView({ report, onClose }) {
           ))}
         </Table>
 
+        <TechWorkView techWork={report.techWork} />
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {blocks.map(([k, v]) =>
             v ? (
@@ -82,8 +85,11 @@ function Body() {
   const [busy, setBusy] = useState("");
   const [dirty, setDirty] = useState(false);
   const [viewing, setViewing] = useState(null); // a submitted report opened for reading
+  const [techDone, setTechDone] = useState(new Set()); // ids of the allocated work ticked today
+  const [techConfirmed, setTechConfirmed] = useState(false);
 
   const res = useAsync(() => api.get("/api/reports/my", { date }), [date]);
+  useEffect(() => setTechConfirmed(false), [date]);
   const history = useAsync(() => api.get("/api/reports/my/list", { limit: 31 }), []);
   const report = res.data?.report || null;
   const submitted = report?.status === "SUBMITTED";
@@ -94,6 +100,7 @@ function Body() {
     if (!res.data) return;
     setRows(report?.entries?.length ? report.entries.map((e) => ({ ...blank(), ...e })) : [blank()]);
     setSummary({ ...EMPTY_SUMMARY, ...(report?.summary || {}) });
+    setTechDone(new Set((res.data.tech?.items || []).filter((i) => i.done).map((i) => String(i.taskId))));
     setDirty(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [res.data]);
@@ -118,12 +125,24 @@ function Body() {
     setRows(list.length ? list : [blank()]);
     setDirty(true);
   };
+  const tech = res.data?.tech || null; // null = no allocated work, so no Technologies Task card
+  const toggleTech = (id) => {
+    setTechDone((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+    setTechConfirmed(false); // the list changed: confirm it again
+    setDirty(true);
+  };
   const setSum = (k) => (e) => { setSummary((s) => ({ ...s, [k]: e.target.value })); setDirty(true); };
 
   const payload = () => ({
     date,
     entries: rows.filter((r) => !isEmptyRow(r) || (r.from && r.to && r.task)).map((r) => ({ ...r, project: r.project.trim(), task: r.task.trim() })),
     summary,
+    ...(tech && !tech.locked ? { techWork: { doneIds: [...techDone], confirmed: techConfirmed } } : {}),
   });
 
   const saveDraft = async () => {
@@ -150,6 +169,7 @@ function Body() {
       if (toMin(e.to) <= toMin(e.from)) return `Entry ${i + 1}: the end time must be after the start time.`;
       if (e.task.length < 5) return `Entry ${i + 1}: describe what you did.`;
     }
+    if (tech && !tech.locked && !techConfirmed) return "Update the Technologies Task card: tick the allocated work you completed today, then confirm the list.";
     if (summary.achievements.trim().length < 10) return "Write a short summary of what you achieved today.";
     return "";
   };
@@ -159,7 +179,7 @@ function Body() {
     if (msg) return toast(msg, "error");
     ask({
       title: "Submit today's report?",
-      message: `${payload().entries.length} entries · ${fmtMinutes(reportedMin)} reported. After submitting you cannot edit it unless an administrator reopens it.`,
+      message: `${payload().entries.length} entries · ${fmtMinutes(reportedMin)} reported${tech ? ` · Technologies Task ${techDone.size}/${tech.items.length} (${pctText(tech.items.length ? Math.round((techDone.size / tech.items.length) * 1000) / 10 : null)})` : ""}. After submitting you cannot edit it unless an administrator reopens it.`,
       confirmLabel: "Submit report",
       onYes: async () => {
         setBusy("submit");
@@ -213,6 +233,8 @@ function Body() {
           </div>
         </Card>
       )}
+
+      {submitted && tech && <TechWorkCard tech={tech} done={techDone} onToggle={() => {}} confirmed onConfirm={() => {}} />}
 
       {!submitted && (
         <>
@@ -269,6 +291,8 @@ function Body() {
         </ol>
       </Card>
 
+      {tech && <TechWorkCard tech={tech} done={techDone} onToggle={toggleTech} confirmed={techConfirmed} onConfirm={(v) => { setTechConfirmed(v); setDirty(true); }} />}
+
       <Card>
         <p className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2"><FilePenLine size={15} className="text-sky-500" /> End-of-day summary</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -299,7 +323,7 @@ function Body() {
                   className={`w-full flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-xs hover:bg-slate-50 ${h.date === date ? "border-sky-300 bg-sky-50/50" : "border-slate-100"}`}
                 >
                   <span className="font-bold text-slate-800 w-24 shrink-0">{fmtDay(h.date, { weekday: "short", day: "2-digit", month: "short" })}</span>
-                  <span className="text-slate-500">{fmtMinutes(h.reportedMinutes)} · {h.entries?.length || 0} entries</span>
+                  <span className="text-slate-500">{fmtMinutes(h.reportedMinutes)} · {h.entries?.length || 0} entries{h.techWork?.allocated > 0 ? ` · Tech ${pctText(h.techWork.percent)}` : ""}</span>
                   {h.status === "SUBMITTED" ? (
                     <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600"><CheckCircle2 size={14} /> Submitted <Eye size={13} className="text-slate-400" /></span>
                   ) : (

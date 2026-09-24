@@ -20,6 +20,7 @@ const { ok, handle, httpError, isObjectId } = require("../Utils/http");
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const MOBILE = /^[0-9+\-\s()]{7,15}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LEARNING_MODES = ["Full Time", "Part Time", "Freelancer", "Intern"];
 const short = (v, n = 80) => String(v ?? "").trim().slice(0, n);
 
 /** Validate + normalise the editable profile fields. Only supplied fields are returned. */
@@ -76,6 +77,20 @@ async function parseProfile(body = {}, { existingId = null, creating = false } =
     if (body.joiningDate && !isValidDateKey(body.joiningDate)) throw httpError(400, "joiningDate must be YYYY-MM-DD");
     f.joiningDate = body.joiningDate || "";
   }
+  if (body.dateOfBirth !== undefined) {
+    const dob = String(body.dateOfBirth || "").trim();
+    if (dob) {
+      if (!isValidDateKey(dob)) throw httpError(400, "Date of birth must be YYYY-MM-DD");
+      if (dob > dateKey()) throw httpError(400, "Date of birth cannot be in the future");
+      if (dob < "1900-01-01") throw httpError(400, "Please enter a valid date of birth");
+    }
+    f.dateOfBirth = dob;
+  }
+  if (body.learningMode !== undefined) {
+    const mode = String(body.learningMode || "").trim();
+    if (mode && !LEARNING_MODES.includes(mode)) throw httpError(400, "Mode of learning must be Full Time, Part Time, Freelancer or Intern");
+    f.learningMode = mode;
+  }
   if (body.isActive !== undefined) f.isActive = Boolean(body.isActive);
 
   // Wi-Fi mode makes no sense without a branch
@@ -125,8 +140,9 @@ async function afterChange(user, before, patch) {
 // ---------------- list ----------------
 // GET /api/staff?q=&branchId=&mode=&status=active|inactive|all
 const list = handle(async (req, res) => {
-  const { q, branchId, mode, status = "all" } = req.query;
+  const { q, branchId, mode, learningMode, status = "all" } = req.query;
   const query = {};
+  if (LEARNING_MODES.includes(learningMode)) query.learningMode = learningMode;
   if (branchId && isObjectId(branchId)) query.branchId = branchId;
   if (mode) query.attendanceMode = mode;
   if (status === "active") query.isActive = { $ne: false };

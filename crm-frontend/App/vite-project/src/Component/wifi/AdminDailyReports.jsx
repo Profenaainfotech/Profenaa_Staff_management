@@ -2,10 +2,12 @@
 // Filter by date range, name, branch and status; see who has NOT submitted; open a full report,
 // reopen it for correction, print it, or export every entry to CSV.
 import React, { useMemo, useState } from "react";
-import { ClipboardList, Download, Eye, Printer, RefreshCw, RotateCcw, Search, UserX } from "lucide-react";
+import { ClipboardList, Cpu, Download, Eye, Printer, RefreshCw, RotateCcw, Search, UserX } from "lucide-react";
 import { useAsync, useLiveRefresh } from "../../lib/hooks";
 import { downloadCsv, fmtDay, fmtMinutes, fmtTime, istDateKey } from "../../lib/format";
-import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Stat, Table, TextArea, TextInput, Themed, useApi, useToast } from "./ui";
+import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Stat, Table, Tabs, TextArea, TextInput, Themed, useApi, useToast } from "./ui";
+import { TechWorkView, pctText, pctTone } from "./TechWorkCard";
+import TechTasksAdmin from "./TechTaskAdmin";
 
 const STATUS_TONE = { Completed: "green", "In Progress": "blue", Blocked: "red" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -17,6 +19,13 @@ function printReport(r, att) {
     .map((e) => `<tr><td>${esc(e.from)} – ${esc(e.to)}</td><td>${esc(e.project)}</td><td>${esc(e.category)}</td><td>${esc(e.task)}</td><td>${esc(e.status)}</td><td style="text-align:right">${esc(fmtMinutes(e.minutes))}</td></tr>`)
     .join("");
   const block = (t, v) => (v ? `<h3>${t}</h3><p>${esc(v).replace(/\n/g, "<br>")}</p>` : "");
+  const tw = r.techWork;
+  const techBlock =
+    tw && tw.allocated > 0
+      ? `<h3>Technologies Task - ${esc(pctText(tw.percent))} (${tw.ticked}/${tw.allocated} ticked)</h3><table><thead><tr><th>Type</th><th>Work</th><th>Technology</th><th>Done</th></tr></thead><tbody>${(tw.items || [])
+          .map((i) => `<tr><td>${i.kind === "PastWork" ? "Past work" : "Task"}</td><td>${esc(i.title)}</td><td>${esc(i.technology)}</td><td>${i.done ? "Yes" : "No"}</td></tr>`)
+          .join("")}</tbody></table>`
+      : "";
   w.document.write(`<!doctype html><html><head><title>Daily Report - ${esc(r.userName)} - ${esc(r.date)}</title>
 <style>body{font-family:Segoe UI,Arial,sans-serif;color:#0f172a;margin:32px;font-size:13px}h1{font-size:20px;margin:0}h2{font-size:12px;color:#64748b;margin:2px 0 18px;font-weight:600}
 .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}.meta div{border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px}.meta b{display:block;font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em}
@@ -25,7 +34,7 @@ table{width:100%;border-collapse:collapse;margin-bottom:16px}th{background:#f1f5
 <h1>Daily Report</h1><h2>${esc(r.userName)}${r.role ? ` · ${esc(r.role)}` : ""}${r.branchId?.name ? ` · ${esc(r.branchId.name)}` : ""} · ${esc(fmtDay(r.date, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}</h2>
 <div class="meta"><div><b>Status</b>${esc(r.status === "SUBMITTED" ? "Submitted" : "Draft")}</div><div><b>Reported</b>${esc(fmtMinutes(r.reportedMinutes))}</div><div><b>Attendance</b>${esc(att ? fmtMinutes(att.totalMinutes) : "--")}</div><div><b>Submitted at</b>${esc(r.submittedAt ? fmtTime(r.submittedAt) : "--")}</div></div>
 <table><thead><tr><th>Time</th><th>Project</th><th>Category</th><th>Work done</th><th>Status</th><th>Hours</th></tr></thead><tbody>${rows}</tbody></table>
-${block("Achievements", r.summary?.achievements)}${block("Blockers / issues", r.summary?.blockers)}${block("Plan for tomorrow", r.summary?.tomorrowPlan)}${block("Notes", r.summary?.notes)}
+${techBlock}${block("Achievements", r.summary?.achievements)}${block("Blockers / issues", r.summary?.blockers)}${block("Plan for tomorrow", r.summary?.tomorrowPlan)}${block("Notes", r.summary?.notes)}
 <script>window.onload=function(){window.print()}</script></body></html>`);
   w.document.close();
 }
@@ -88,6 +97,8 @@ function ReportModal({ id, onClose, onChanged }) {
             ))}
           </Table>
 
+          <TechWorkView techWork={r.techWork} />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[["Achievements", r.summary?.achievements], ["Blockers / issues", r.summary?.blockers], ["Plan for tomorrow", r.summary?.tomorrowPlan], ["Notes", r.summary?.notes]].map(([k, v]) =>
               v ? (
@@ -121,7 +132,7 @@ function ReportModal({ id, onClose, onChanged }) {
   );
 }
 
-function Body() {
+function ReportsBody() {
   const api = useApi();
   const today = istDateKey();
   const [from, setFrom] = useState(today);
@@ -146,9 +157,9 @@ function Body() {
 
   const exportCsv = () =>
     downloadCsv(`daily-reports-${from}_${to}.csv`, [
-      ["Date", "Employee", "Role", "Branch", "Status", "From", "To", "Project", "Category", "Work done", "Entry status", "Minutes"],
+      ["Date", "Employee", "Role", "Branch", "Status", "From", "To", "Project", "Category", "Work done", "Entry status", "Minutes", "Tech task % (day)", "Tech ticked / allocated"],
       ...reports.flatMap((r) =>
-        (r.entries?.length ? r.entries : [{}]).map((e) => [r.date, r.userName, r.role, r.branchId?.name || "", r.status, e.from || "", e.to || "", e.project || "", e.category || "", e.task || "", e.status || "", e.minutes ?? ""])
+        (r.entries?.length ? r.entries : [{}]).map((e) => [r.date, r.userName, r.role, r.branchId?.name || "", r.status, e.from || "", e.to || "", e.project || "", e.category || "", e.task || "", e.status || "", e.minutes ?? "", r.techWork?.allocated > 0 ? r.techWork.percent : "", r.techWork?.allocated > 0 ? `${r.techWork.ticked}/${r.techWork.allocated}` : ""])
       ),
     ]);
 
@@ -210,7 +221,7 @@ function Body() {
         {list.loading && !list.data ? <Spinner /> : reports.length === 0 ? (
           <Empty icon={<ClipboardList size={20} />} title="No reports for these filters" hint="Reports appear here as soon as employees start writing them." />
         ) : (
-          <Table head={["Date", "Employee", "Branch", "Entries", "Reported", "Attendance", "Status", ""]} className="!border-0 !rounded-none">
+          <Table head={["Date", "Employee", "Branch", "Entries", "Reported", "Attendance", "Tech task %", "Status", ""]} className="!border-0 !rounded-none">
             {reports.map((r) => (
               <tr key={r._id} className="cursor-pointer hover:bg-sky-50/60" onClick={() => setOpenId(r._id)}>
                 <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-700">{fmtDay(r.date, { day: "2-digit", month: "short" })}</td>
@@ -222,6 +233,7 @@ function Body() {
                 <td className="px-4 py-3 tabular-nums">{r.entries?.length || 0}</td>
                 <td className="px-4 py-3 font-semibold whitespace-nowrap">{fmtMinutes(r.reportedMinutes)}</td>
                 <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.attendanceMinutes ? fmtMinutes(r.attendanceMinutes) : "--"}</td>
+                <td className="px-4 py-3 whitespace-nowrap">{r.techWork?.allocated > 0 ? <span title={`${r.techWork.ticked} of ${r.techWork.allocated} allocated ticked`}><Badge tone={pctTone(r.status === "SUBMITTED" ? r.techWork.percent : null)}><Cpu size={10} /> {r.status === "SUBMITTED" ? pctText(r.techWork.percent) : "draft"}</Badge></span> : <span className="text-slate-300">--</span>}</td>
                 <td className="px-4 py-3"><Badge tone={r.status === "SUBMITTED" ? "green" : "amber"}>{r.status === "SUBMITTED" ? "Submitted" : "Draft"}</Badge>{r.submittedAt && <span className="block text-[10px] text-slate-400 mt-0.5">{fmtTime(r.submittedAt)}</span>}</td>
                 <td className="px-4 py-3 text-right text-[11px] font-semibold text-blue-700"><Eye size={13} className="inline mr-1" />View</td>
               </tr>
@@ -236,9 +248,20 @@ function Body() {
 }
 
 export default function AdminDailyReports() {
+  const [tab, setTab] = useState("reports");
   return (
     <Themed role="admin">
-      <div className="p-4 sm:p-6 lg:p-8"><Body /></div>
+      <div className="p-4 sm:p-6 lg:p-8 space-y-5">
+        <Tabs
+          tabs={[
+            { id: "reports", label: "Daily reports", icon: <ClipboardList size={14} /> },
+            { id: "tech", label: "Technologies tasks", icon: <Cpu size={14} /> },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+        {tab === "reports" ? <ReportsBody /> : <TechTasksAdmin />}
+      </div>
     </Themed>
   );
 }

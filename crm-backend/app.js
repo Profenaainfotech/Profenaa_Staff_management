@@ -19,6 +19,7 @@ const regularizationRouter = require("./src/routers/Regularization.route");
 const settingRouter = require("./src/routers/Setting.route");
 const staffRouter = require("./src/routers/Staff.route");
 const dailyReportRouter = require("./src/routers/DailyReport.route");
+const techTaskRouter = require("./src/routers/TechTask.route");
 
 const app = express();
 
@@ -63,6 +64,7 @@ app.use("/api/regularizations", regularizationRouter);
 app.use("/api/settings", settingRouter);
 app.use("/api/staff", staffRouter);
 app.use("/api/reports", dailyReportRouter);
+app.use("/api/tech-tasks", techTaskRouter);
 
 // Unknown API routes / unhandled errors answer in JSON instead of an HTML page
 app.use("/api", (req, res) =>

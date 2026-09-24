@@ -1,7 +1,7 @@
 // =====================================================================
 // PROJECTS
 //
-//   Admin  : create (Internal / External), edit, delete, see everything
+//   Admin  : create (Internal / External / Technologies), edit, delete, see everything
 //   Staff  : see the project pool, take a project (self-assign) - ONE at a time
 //   Everyone: the leaderboard (who completes the most projects, on time)
 //
@@ -22,11 +22,14 @@ const Project = require("../Models/Project.Model");
 const ProjectClaim = require("../Models/ProjectClaim.Model");
 const ProjectSlot = require("../Models/ProjectSlot.Model");
 const Task = require("../Models/Task.Model");
+const TechTask = require("../Models/TechTask.Model");
 const User = require("../Models/User.Model");
 const notify = require("../Services/notification.service");
 const { ok, fail, handle, isObjectId, httpError } = require("../Utils/http");
+const { dateKey } = require("../Utils/time");
+const catalog = require("../Utils/technologyCatalog");
 
-const TYPES = ["Internal", "External"];
+const TYPES = ["Internal", "External", "Technologies"];
 const MAX_IMAGES = 10;
 const UPLOAD_PREFIX = "/uploads/projects/";
 const UPLOAD_DIR = path.join(__dirname, "../../uploads/projects");
@@ -83,6 +86,8 @@ function readFields(body, { creating, current }) {
   let projectType = current?.projectType || "Internal";
   if (rawType !== undefined && rawType !== "") {
     if (!TYPES.includes(rawType)) throw httpError(400, "Project type must be Internal or External.");
+    // Technologies projects have their own form (domains + work items), never this one
+    if (rawType === "Technologies" && current?.projectType !== "Technologies") throw httpError(400, "Technologies projects are created from the Technologies form.");
     projectType = rawType;
   }
 
@@ -141,6 +146,8 @@ async function spawnTask(project, user, assignedBy) {
     status: "Pending",
     projectId: project._id,
     projectType: project.projectType,
+    domains: project.domains || [],
+    workItems: project.workItems || [],
   });
   project.taskId = task._id;
   project.assignmentType = assignedBy === "Self Assignment" ? "Self" : "Admin";
@@ -221,6 +228,79 @@ const createProject = handle(async (req, res) => {
 });
 
 // =====================================================================
+// TECHNOLOGIES  (admin)
+//
+// A Technologies project is a title + one staff member + the work items the admin ticked
+// (each item belongs to a domain: Sales, Training, Marketing, Placement, HR, Social Media -
+// see Utils/technologyCatalog). Staff are always chosen up front, so it goes straight to
+// that person as a task; it never enters the pool.
+// =====================================================================
+const getTechnologyCatalog = handle(async (req, res) => ok(res, { domains: catalog.DOMAINS, items: catalog.ITEMS }));
+
+const createTechnologyProject = handle(async (req, res) => {
+  const title = clean(req.body.title, 200);
+  if (title.length < 3) throw httpError(400, "Project title is required (at least 3 characters).");
+  if (title.length > 120) throw httpError(400, "Project title is too long (maximum 120 characters).");
+
+  if (!req.body.assignedTo) throw httpError(400, "Select the staff member this project is for.");
+  const owner = await findStaff(req.body.assignedTo);
+
+  const ids = Array.isArray(req.body.workItemIds) ? req.body.workItemIds : [];
+  if (!ids.length) throw httpError(400, "Tick at least one work item.");
+  const workItems = catalog.resolveItems(ids);
+  if (!workItems) throw httpError(400, "One of the selected work items does not exist. Reload the form and try again.");
+  const domains = catalog.domainsOf(workItems);
+
+  const project = await Project.create({
+    title,
+    projectType: "Technologies",
+    domains,
+    workItems,
+    description: `${domains.join(", ")} · ${workItems.length} work item${workItems.length === 1 ? "" : "s"}: ${workItems.map((i) => i.title).join("; ")}`.slice(0, 2000),
+    createdBy: req.admin?.name || "Admin",
+    status: "Pending",
+    ...poolFields(),
+  });
+  await spawnTask(project, owner, req.admin?.name); // a summary task, so it also shows on their dashboard and in My Tasks
+
+  // One TechTask per ticked work item, for the SAME person - these are what actually turn
+  // into tick boxes in their Daily Report and feed the daily percentage (see
+  // Services/techWork.service.js). Without this, ticking the items in the catalog would only
+  // ever create a summary task and never show up for the staff member to tick off daily.
+  const today = dateKey();
+  const techTasks = await TechTask.insertMany(
+    workItems.map((item) => ({
+      title: item.title,
+      kind: "Task",
+      technology: item.domain,
+      assignedTo: owner._id,
+      assignedToName: owner.name,
+      assignedBy: req.admin?.name || "Admin",
+      startDate: today,
+      endDate: "",
+    }))
+  );
+  project.techTaskIds = techTasks.map((t) => t._id);
+  await project.save();
+
+  await Promise.all(
+    techTasks.map((t) =>
+      notify.notifyUser(owner._id, {
+        category: "task",
+        type: "TECH_TASK_ALLOCATED",
+        severity: "info",
+        title: "Technologies task allocated to you",
+        message: `${t.title} - tick it in your Daily Report on the days you complete it.`,
+        link: "Daily Report",
+      })
+    )
+  );
+
+  await project.populate("assignedTo", POPULATE);
+  return ok(res, { message: `Technologies project created and assigned to ${owner.name}. It now shows as ${workItems.length} tickable item${workItems.length === 1 ? "" : "s"} in their Daily Report.`, project }, 201);
+});
+
+// =====================================================================
 // EDIT  (admin)
 // =====================================================================
 const updateProject = handle(async (req, res) => {
@@ -229,6 +309,7 @@ const updateProject = handle(async (req, res) => {
     if (!isObjectId(req.params.projectId)) throw httpError(400, "Invalid project.");
     const project = await Project.findById(req.params.projectId);
     if (!project) throw httpError(404, "Project not found.");
+    if (project.projectType === "Technologies") throw httpError(409, "A Technologies project cannot be edited. Delete it and create it again with the right work items.");
 
     const f = readFields(req.body, { creating: false, current: project });
 
@@ -297,6 +378,8 @@ const deleteProject = handle(async (req, res) => {
     const task = await Task.findById(project.taskId);
     if (task && task.status !== "Completed") await Task.deleteOne({ _id: task._id });
   }
+  // Technologies: its tick-able work items go too, so they stop showing in Daily Reports
+  if (project.techTaskIds?.length) await TechTask.deleteMany({ _id: { $in: project.techTaskIds } });
 
   if (project.assignedTo && project.status !== "Completed") {
     notify.notifyUser(project.assignedTo, {
@@ -575,6 +658,8 @@ const getLeaderboard = handle(async (req, res) => {
 
 module.exports = {
   createProject,
+  createTechnologyProject,
+  getTechnologyCatalog,
   updateProject,
   deleteProject,
   getAllProjects,

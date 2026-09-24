@@ -44,8 +44,11 @@ import {
   Pencil,
   Trash2,
   Send,
+  Cpu,
 } from "lucide-react";
 import ProjectFormModal from "./projects/ProjectFormModal";
+import TechnologyFormModal from "./projects/TechnologyFormModal";
+import { DomainChips, WorkItemList } from "./projects/TechnologyWork";
 import {
   TYPE_STYLE,
   fmtMinutes,
@@ -392,6 +395,7 @@ export default function ProjectManagement() {
 
   const [typeTab, setTypeTab] = useState("Internal");
   const [formModal, setFormModal] = useState(null); // { mode: "create" | "edit", type?, project? }
+  const [techModal, setTechModal] = useState(false); // the Technologies form (domains + work items)
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const errorTimer = useRef(null);
@@ -577,6 +581,10 @@ export default function ProjectManagement() {
 
   const openCreateModal = (category = "Internal") => {
     setTypeTab(category); // the new card shows up under this heading
+    if (category === "Technologies") {
+      setTechModal(true);
+      return;
+    }
     setFormModal({ mode: "create", type: category });
   };
 
@@ -587,6 +595,7 @@ export default function ProjectManagement() {
 
   const handleProjectSaved = async (project, message) => {
     setFormModal(null);
+    setTechModal(false);
     if (project?.projectType) setTypeTab(project.projectType);
     showSuccess(message || "Project saved.");
     await fetchProjects();
@@ -1160,6 +1169,16 @@ export default function ProjectManagement() {
               External Projects
             </button>
 
+            <button
+              type="button"
+              onClick={() => openCreateModal("Technologies")}
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-black text-sm hover:bg-teal-700 shadow-lg shadow-teal-200 transition"
+            >
+              <Plus size={18} />
+
+              Technologies
+            </button>
+
           </div>
 
         </div>
@@ -1472,7 +1491,7 @@ export default function ProjectManagement() {
         role="tablist"
         aria-label="Project type"
       >
-        {["Internal", "External"].map((t) => {
+        {["Internal", "External", "Technologies"].map((t) => {
           const active = typeTab === t;
           const count = projects.filter((p) => typeOf(p) === t).length;
           return (
@@ -1486,11 +1505,13 @@ export default function ProjectManagement() {
                 active
                   ? t === "Internal"
                     ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-                    : "border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-600/20"
+                    : t === "External"
+                    ? "border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-600/20"
+                    : "border-teal-600 bg-teal-600 text-white shadow-lg shadow-teal-600/20"
                   : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
               }`}
             >
-              {t} Projects
+              {t === "Technologies" ? t : `${t} Projects`}
               <span
                 className={`rounded-full px-2 py-0.5 text-xs ${
                   active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
@@ -2056,12 +2077,16 @@ export default function ProjectManagement() {
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center text-slate-400">
-                                  <ImageIcon
-                                    size={
-                                      22
-                                    }
-                                  />
+                                <div className={`w-full h-full flex items-center justify-center ${typeOf(project) === "Technologies" ? "bg-teal-50 text-teal-500" : "text-slate-400"}`}>
+                                  {typeOf(project) === "Technologies" ? (
+                                    <Cpu size={22} />
+                                  ) : (
+                                    <ImageIcon
+                                      size={
+                                        22
+                                      }
+                                    />
+                                  )}
                                 </div>
                               )}
 
@@ -2079,6 +2104,9 @@ export default function ProjectManagement() {
                               >
                                 {typeOf(project)}
                               </span>
+                              {typeOf(project) === "Technologies" && (
+                                <DomainChips domains={project.domains} className="mt-1.5 max-w-[250px]" />
+                              )}
 
                               <p className="text-xs text-slate-400 mt-1 truncate max-w-[250px]">
                                 {getProjectDescription(
@@ -2219,14 +2247,16 @@ export default function ProjectManagement() {
 
                             View
                           </button>
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(project)}
-                              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                              aria-label={`Edit ${getProjectName(project)}`}
-                            >
-                              <Pencil size={15} />
-                            </button>
+                            {typeOf(project) !== "Technologies" && (
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(project)}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                                aria-label={`Edit ${getProjectName(project)}`}
+                              >
+                                <Pencil size={15} />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => askDelete(project)}
@@ -2271,6 +2301,19 @@ export default function ProjectManagement() {
           defaultType={formModal.type || "Internal"}
           users={users}
           onClose={() => setFormModal(null)}
+          onSaved={handleProjectSaved}
+        />
+      )}
+
+      {/* ===================================================
+          CREATE TECHNOLOGIES PROJECT
+          (title, staff, domain filter, work-item checkboxes)
+      =================================================== */}
+
+      {techModal && (
+        <TechnologyFormModal
+          users={users}
+          onClose={() => setTechModal(false)}
           onSaved={handleProjectSaved}
         />
       )}
@@ -2367,13 +2410,15 @@ export default function ProjectManagement() {
                 </div>
 
                 <div className="ml-auto mr-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(selectedProject)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                  >
-                    <Pencil size={15} /> Edit
-                  </button>
+                  {typeOf(selectedProject) !== "Technologies" && (
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(selectedProject)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Pencil size={15} /> Edit
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => askDelete(selectedProject)}
@@ -2579,6 +2624,11 @@ export default function ProjectManagement() {
                     </span>
                   )}
                 </div>
+                {typeOf(selectedProject) === "Technologies" && (
+                  <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50/50 p-4">
+                    <WorkItemList items={selectedProject.workItems} domains={selectedProject.domains} />
+                  </div>
+                )}
                 {selectedProject?.issueDetails && (
                   <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                     <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-amber-700">

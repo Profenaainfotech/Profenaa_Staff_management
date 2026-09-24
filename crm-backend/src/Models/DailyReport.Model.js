@@ -14,6 +14,34 @@ const entrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Technologies Task card: the allocated work (and past work) the staff member ticked that day.
+// Only present for staff who had allocated work; everyone else keeps allocated = 0.
+const techItemSchema = new mongoose.Schema(
+  {
+    taskId: { type: mongoose.Schema.Types.ObjectId, ref: "TechTask" },
+    title: { type: String, default: "" },
+    kind: { type: String, enum: ["Task", "PastWork"], default: "Task" },
+    technology: { type: String, default: "" },
+    done: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+const techWorkSchema = new mongoose.Schema(
+  {
+    items: { type: [techItemSchema], default: [] },
+    allocated: { type: Number, default: 0 },
+    ticked: { type: Number, default: 0 },
+    percent: { type: Number, default: null }, // ticked / allocated x 100 (0 when nothing ticked)
+    taskAllocated: { type: Number, default: 0 },
+    taskTicked: { type: Number, default: 0 },
+    taskPercent: { type: Number, default: null },
+    pastAllocated: { type: Number, default: 0 },
+    pastTicked: { type: Number, default: 0 },
+    pastPercent: { type: Number, default: null },
+  },
+  { _id: false }
+);
+
 const dailyReportSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "UserAccounts", required: true },
@@ -31,6 +59,8 @@ const dailyReportSchema = new mongoose.Schema(
       tomorrowPlan: { type: String, default: "" },
       notes: { type: String, default: "" },
     },
+
+    techWork: { type: techWorkSchema, default: () => ({}) },
 
     reportedMinutes: { type: Number, default: 0 }, // sum of the entries
     attendanceMinutes: { type: Number, default: 0 }, // worked time on the attendance record when submitted

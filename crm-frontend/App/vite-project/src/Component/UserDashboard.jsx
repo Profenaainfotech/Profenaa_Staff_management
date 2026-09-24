@@ -42,6 +42,8 @@ import RecentProjects from "./projects/RecentProjects";
 import ProjectLeaderboard from "./projects/ProjectLeaderboard";
 import StaffProjectCard from "./projects/StaffProjectCard";
 import ProjectDetailsModal from "./projects/ProjectDetailsModal";
+import MyTechnologyProjects from "./projects/MyTechnologyProjects";
+import { DomainChips, WorkItemList } from "./projects/TechnologyWork";
 import { FlashBanner } from "./projects/Flash";
 import { useFlash } from "./projects/useFlash";
 import { projectRequest } from "./projects/projectApi";
@@ -1753,6 +1755,10 @@ export default function UserDashboard() {
               )}
 
               <div className="space-y-8">
+                <MyTechnologyProjects
+                  tasks={tasks}
+                  onOpenTasks={() => setActiveTab("My Tasks")}
+                />
                 <RecentProjects
                   pool={projectPool}
                   loading={projectLoading}
@@ -2398,10 +2404,24 @@ function TaskList({
                         "Untitled Task"}
                     </h3>
 
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed break-words">
-                      {task.description ||
-                        "No description"}
-                    </p>
+                    {task.projectType === "Technologies" ? (
+                      <>
+                        <DomainChips
+                          domains={task.domains}
+                          className="mt-2"
+                        />
+                        <WorkItemList
+                          items={task.workItems}
+                          domains={task.domains}
+                          className="mt-3 rounded-xl bg-slate-50 p-3"
+                        />
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed break-words">
+                        {task.description ||
+                          "No description"}
+                      </p>
+                    )}
 
                   </div>
 

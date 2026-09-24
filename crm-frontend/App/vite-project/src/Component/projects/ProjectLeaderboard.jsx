@@ -64,7 +64,7 @@ export default function ProjectLeaderboard({ role = "user", compact = false }) {
 
       <div className="mt-4 flex flex-wrap gap-x-6 gap-y-3">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Project type">
-          {["All", "Internal", "External"].map((t) => (
+          {["All", "Internal", "External", "Technologies"].map((t) => (
             <Chip key={t} active={type === t} onClick={() => setType(t)}>{t}</Chip>
           ))}
         </div>

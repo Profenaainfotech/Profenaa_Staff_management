@@ -101,6 +101,8 @@ async function buildRows(users, day) {
       email: u.email || "",
       employeeCode: u.employeeCode || "",
       joiningDate: u.joiningDate || "",
+      dateOfBirth: u.dateOfBirth || "",
+      learningMode: u.learningMode || "",
       isActive: u.isActive !== false,
       branch: branch ? { id: branch._id, name: branch.name } : null,
       mode: u.attendanceMode || "CRM_LOGIN",

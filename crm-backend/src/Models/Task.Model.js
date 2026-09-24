@@ -92,8 +92,26 @@ const taskSchema = new mongoose.Schema(
     // Tasks screens can show it without an extra lookup. Null for a task with no project.
     projectType: {
       type: String,
-      enum: ["Internal", "External", null],
+      enum: ["Internal", "External", "Technologies", null],
       default: null,
+    },
+
+    // Technologies projects only: copied from the project so the staff dashboard can show the
+    // domains and the exact work items that were allocated. Empty for every other task.
+    domains: {
+      type: [String],
+      default: [],
+    },
+    workItems: {
+      type: [
+        {
+          _id: false,
+          itemId: { type: Number, required: true },
+          title: { type: String, required: true },
+          domain: { type: String, required: true },
+        },
+      ],
+      default: [],
     },
 
     // -------------------------------------------------

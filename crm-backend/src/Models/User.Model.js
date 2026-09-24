@@ -113,6 +113,16 @@ const UserSchema = new mongoose.Schema(
     department: { type: String, default: "", trim: true },
     employeeCode: { type: String, default: "", trim: true },
     joiningDate: { type: String, default: "" }, // YYYY-MM-DD
+
+    // Date of birth (YYYY-MM-DD)
+    dateOfBirth: { type: String, default: "" },
+
+    // Mode of learning / engagement: Full Time, Part Time, Freelancer or Intern
+    learningMode: {
+      type: String,
+      enum: ["", "Full Time", "Part Time", "Freelancer", "Intern"],
+      default: "",
+    },
   },
   {
     timestamps: true,

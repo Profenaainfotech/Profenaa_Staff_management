@@ -9,6 +9,7 @@ const DailyReport = require("../Models/DailyReport.Model");
 const Attendance = require("../Models/Attendance.Model");
 const User = require("../Models/User.Model");
 const notify = require("../Services/notification.service");
+const tech = require("../Services/techWork.service");
 const { dateKey, isValidDateKey, addDays } = require("../Utils/time");
 const { ok, handle, httpError, isObjectId } = require("../Utils/http");
 
@@ -78,12 +79,16 @@ const myReport = handle(async (req, res) => {
     Attendance.findOne({ userId: req.payload.id, date }).select("checkIn checkOut totalMinutes overtimeMinutes offDayMinutes dayType").lean(),
     User.findById(req.payload.id).select("shiftStart shiftEnd").lean(),
   ]);
+  // Technologies Task card: null unless this person has allocated work (their DHR is then unchanged)
+  const techCard = await tech.forDay(req.payload.id, date, report);
+  if (techCard) techCard.recent = await tech.recent(req.payload.id, dateKey());
   ok(res, {
     date,
     report,
     attendance: att || null,
     shift: user ? { start: user.shiftStart, end: user.shiftEnd } : null,
     editable: !report || report.status === "DRAFT",
+    tech: techCard,
   });
 });
 
@@ -104,6 +109,20 @@ async function upsert(req, { submit }) {
   if (entries !== undefined) doc.entries = entries;
   if (summary !== undefined) doc.summary = summary;
   doc.reportedMinutes = sum(doc.entries);
+
+  // Technologies Task card - only for staff who have allocated work on this date.
+  // The ticks decide the percentage (ticked / allocated); unticked items count as not done.
+  const allocs = await tech.activeAllocations(userId, date);
+  const tw = req.body.techWork;
+  if (allocs.length) {
+    const keep = (doc.techWork?.items || []).filter((i) => i.done).map((i) => i.taskId);
+    doc.techWork = tech.snapshot(allocs, tw !== undefined ? tw?.doneIds : keep);
+    if (submit && tw?.confirmed !== true) {
+      throw httpError(400, "Tick the allocated work you completed today in the Technologies Task card (leave the rest unticked) and confirm it before submitting.");
+    }
+  } else {
+    doc.techWork = tech.snapshot([], []);
+  }
 
   if (submit) {
     if (!doc.entries.length) throw httpError(400, "Add at least one entry describing your work");

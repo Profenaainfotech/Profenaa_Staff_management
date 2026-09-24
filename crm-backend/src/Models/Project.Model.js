@@ -18,8 +18,26 @@ const ProjectSchema = new mongoose.Schema(
     // External = client / outside project
     projectType: {
       type: String,
-      enum: ["Internal", "External"],
+      enum: ["Internal", "External", "Technologies"],
       default: "Internal",
+    },
+
+    // Technologies projects only: which domains (Sales, HR, ...) the work belongs to, and the
+    // exact work items the admin ticked (from Utils/technologyCatalog). Empty for the other types.
+    domains: {
+      type: [String],
+      default: [],
+    },
+    workItems: {
+      type: [
+        {
+          _id: false,
+          itemId: { type: Number, required: true },
+          title: { type: String, required: true },
+          domain: { type: String, required: true },
+        },
+      ],
+      default: [],
     },
 
     // The particular error / change that has to be fixed in this project
@@ -57,6 +75,14 @@ const ProjectSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Task",
       default: null,
+    },
+
+    // Technologies projects only: one TechTask per selected work item, for the assigned
+    // person. These are what actually show up as tick boxes in their Daily Report and feed
+    // the daily percentage - deleting the project removes them too, so nothing is left behind.
+    techTaskIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "TechTask" }],
+      default: [],
     },
 
     dueDate: {
