@@ -27,7 +27,7 @@ const User = require("../Models/User.Model");
 const notify = require("../Services/notification.service");
 const { ok, fail, handle, isObjectId, httpError } = require("../Utils/http");
 const { dateKey } = require("../Utils/time");
-const catalog = require("../Utils/Technologycatalog");
+const catalog = require("../Utils/technologyCatalog");
 
 const TYPES = ["Internal", "External", "Technologies"];
 const MAX_IMAGES = 10;
