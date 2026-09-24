@@ -1,5 +1,7 @@
-// Staff dashboard: "Recent Projects" - the newest Internal and External projects, one per row.
-// Take one (optionally starting it straight away), start it, submit a link for admin review.
+// Staff dashboard: "Recent Projects" - the newest Internal and External projects in the
+// pool, one per row. Taking one immediately turns it into a task - see it and work it from
+// My Tasks from that point on, so this widget only ever needs to show what is still up for
+// grabs. (The server still enforces "one active task at a time" either way.)
 import React, { useMemo, useState } from "react";
 import { FolderKanban, PackageOpen } from "lucide-react";
 import { FlashBanner } from "./Flash";
@@ -10,37 +12,25 @@ import { projectRequest } from "./projectApi";
 
 const SHOW = 6;
 
-export default function RecentProjects({ projects = [], pool: poolIn = [], loading = false, onChanged, onViewAll }) {
+export default function RecentProjects({ pool = [], loading = false, onChanged, onViewAll }) {
   const [type, setType] = useState("All");
   const [busyId, setBusyId] = useState("");
   const [open, setOpen] = useState(null);
   const { flash, success, error, clear } = useFlash();
 
-  // the two lists refresh one after the other: never show a project I already hold as "available" as well
-  const pool = useMemo(() => {
-    const mine = new Set(projects.map((p) => p._id));
-    return poolIn.filter((p) => !mine.has(p._id));
-  }, [poolIn, projects]);
-  const active = useMemo(() => projects.find((p) => p.status !== "Completed") || null, [projects]);
   const match = (p) => type === "All" || p.projectType === type;
+  const list = useMemo(() => [...pool].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).filter(match).slice(0, SHOW), [pool, type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const list = useMemo(() => {
-    const byNewest = (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
-    const done = projects.filter((p) => p.status === "Completed").sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
-    return [...(active && match(active) ? [active] : []), ...[...pool].sort(byNewest).filter(match), ...done.filter(match).slice(0, 2)].slice(0, SHOW);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects, pool, type, active]);
+  const counts = useMemo(
+    () => ({ All: pool.length, Internal: pool.filter((p) => p.projectType === "Internal").length, External: pool.filter((p) => p.projectType === "External").length }),
+    [pool]
+  );
 
-  const counts = useMemo(() => {
-    const all = [...pool, ...(active ? [active] : [])];
-    return { All: all.length, Internal: all.filter((p) => p.projectType === "Internal").length, External: all.filter((p) => p.projectType === "External").length };
-  }, [pool, active]);
-
-  const run = async (project, call, message) => {
+  const take = async (project) => {
     setBusyId(project._id);
     try {
-      const data = await call();
-      success(data?.message || message);
+      const data = await projectRequest("user", "PUT", `/self-assign/${project._id}`, { json: {} });
+      success(data?.message || "Successfully added to your tasks.");
       await onChanged?.();
     } catch (err) {
       error(err.message);
@@ -50,10 +40,6 @@ export default function RecentProjects({ projects = [], pool: poolIn = [], loadi
     }
   };
 
-  const take = (p, start) => run(p, () => projectRequest("user", "PUT", `/self-assign/${p._id}`, { json: { start } }));
-  const startIt = (p) => run(p, () => projectRequest("user", "PUT", `/start/${p._id}`, { json: {} }));
-  const submitWork = (p, link) => run(p, () => projectRequest("user", "PUT", `/submit/${p._id}`, { json: { link } }), "Submitted for admin review.");
-
   return (
     <section aria-label="Recent projects">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -61,7 +47,7 @@ export default function RecentProjects({ projects = [], pool: poolIn = [], loadi
           <h3 className="flex items-center gap-2 font-bold text-slate-900">
             <FolderKanban size={18} className="text-sky-600" /> Recent Projects
           </h3>
-          <p className="mt-1 text-[11px] text-slate-500">Latest internal and external projects. Take one and start working - one project at a time.</p>
+          <p className="mt-1 text-[11px] text-slate-500">Newest internal and external projects up for grabs. Take one and it lands in My Tasks.</p>
         </div>
         <button type="button" onClick={onViewAll} className="text-xs font-semibold text-sky-600 hover:text-sky-700">
           View All
@@ -89,7 +75,7 @@ export default function RecentProjects({ projects = [], pool: poolIn = [], loadi
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           {list.map((p) => (
-            <StaffProjectCard key={p._id} project={p} mine={projects.some((m) => m._id === p._id)} hasActive={Boolean(active)} busy={busyId === p._id} onTake={take} onStart={startIt} onSubmit={submitWork} onOpen={setOpen} />
+            <StaffProjectCard key={p._id} project={p} busy={busyId === p._id} onTake={take} onOpen={setOpen} />
           ))}
         </div>
       )}

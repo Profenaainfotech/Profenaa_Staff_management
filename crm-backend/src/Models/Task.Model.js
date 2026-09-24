@@ -8,7 +8,7 @@ const commentSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "UserAccounts",
       required: true,
     },
 
@@ -56,7 +56,7 @@ const taskSchema = new mongoose.Schema(
 
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "UserAccounts",
       required: true,
     },
 
@@ -72,6 +72,28 @@ const taskSchema = new mongoose.Schema(
     assignedBy: {
       type: String,
       default: "Admin",
+    },
+
+    // -------------------------------------------------
+    // ORIGIN
+    // -------------------------------------------------
+
+    // Set when this task was created automatically because a Project was assigned to
+    // someone (by the admin, or self-assigned by the staff member). Null for a task the
+    // admin created directly - the two are tracked and evaluated exactly the same way from
+    // this point on, there is no separate "project tracking" once a task exists.
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Projects",
+      default: null,
+    },
+
+    // Copied from the project at the moment it became a task (Internal / External), so the
+    // Tasks screens can show it without an extra lookup. Null for a task with no project.
+    projectType: {
+      type: String,
+      enum: ["Internal", "External", null],
+      default: null,
     },
 
     // -------------------------------------------------
@@ -130,7 +152,7 @@ const taskSchema = new mongoose.Schema(
     submittedBy: {
       userId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
+        ref: "UserAccounts",
         default: null,
       },
 
@@ -154,6 +176,8 @@ const taskSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+taskSchema.index({ projectId: 1 });
 
 module.exports = mongoose.model(
   "Task",

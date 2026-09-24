@@ -57,7 +57,7 @@ function Step({ n, label, required, hint, error, children, htmlFor }) {
   );
 }
 
-export default function ProjectFormModal({ mode = "create", project = null, defaultType = "Internal", users = [], onClose, onSaved }) {
+export default function ProjectFormModal({ mode = "create", project = null, defaultType = "Internal", defaultAssignedTo = "", users = [], onClose, onSaved }) {
   const editing = mode === "edit";
   // once somebody has started the project, who holds it can no longer be changed here
   const assignmentLocked = editing && project?.status !== "Pending";
@@ -67,7 +67,7 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
     title: project?.title || "",
     issueDetails: project?.issueDetails || "",
     description: project?.description || "",
-    assignedTo: project?.assignedTo?._id || (typeof project?.assignedTo === "string" ? project.assignedTo : "") || "",
+    assignedTo: project?.assignedTo?._id || (typeof project?.assignedTo === "string" ? project.assignedTo : "") || defaultAssignedTo || "",
     validity: editing ? "keep" : "none",
     customDue: toLocalInput(daysFromNow(7)),
   }));

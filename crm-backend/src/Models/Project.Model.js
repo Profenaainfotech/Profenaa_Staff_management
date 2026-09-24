@@ -49,6 +49,16 @@ const ProjectSchema = new mongoose.Schema(
       },
     ],
 
+    // The Task now tracking this project's actual work, once someone is assigned (by the
+    // admin, or by self-assigning). Everything after assignment - starting, submitting,
+    // being marked complete - happens on that task, not here, so there is one evaluation
+    // flow instead of two.
+    taskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
+    },
+
     dueDate: {
       type: Date,
       default: null,
@@ -98,35 +108,22 @@ const ProjectSchema = new mongoose.Schema(
       default: null,
     },
 
+    // Pending = in the pool, nobody assigned yet
+    // Assigned = handed off to a Task (see taskId) - that task tracks the real progress
+    // Completed = mirrors the linked task's completion, for reporting and the leaderboard
     status: {
       type: String,
-      enum: ["Pending", "In Progress", "Submitted", "Completed"],
+      enum: ["Pending", "Assigned", "Completed"],
       default: "Pending",
     },
 
-    // The staff member's proof of work (a GitHub link, a Drive link, etc.), submitted for
-    // admin review before a project can be marked Completed.
-    submissionLink: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    // When the current submission was sent in. Used (not the admin's approval time) to work
-    // out whether the project was finished on time, so a slow admin review never counts against
-    // the staff member.
-    submittedAt: {
-      type: Date,
-      default: null,
-    },
-
-    // Filled in when the project is completed (used by the staff competition)
+    // Filled in when the linked task is completed (used by the staff competition)
     completedOnTime: {
       type: Boolean,
       default: null,
     },
 
-    // Minutes from "started" to "completed"
+    // Minutes from "assigned" to "completed"
     completionMinutes: {
       type: Number,
       default: null,

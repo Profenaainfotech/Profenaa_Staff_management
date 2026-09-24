@@ -1,7 +1,9 @@
-// Read-only details of one project (staff): what to fix, description, all images, validity time.
+// Read-only details of one project (staff), browsing the pool: what to fix, description,
+// all images, validity time. Once taken, a project becomes a task - full progress and
+// completion details from that point on live in My Tasks, not here.
 import React, { useEffect, useState } from "react";
-import { CalendarClock, CheckCircle2, Clock3, ExternalLink, Image as ImageIcon, Send, TriangleAlert, UserRound, X } from "lucide-react";
-import { STATUS_STYLE, TYPE_STYLE, fmtDateTime, fmtMinutes, imageUrl, projectImages, timeLeft } from "./projectApi";
+import { CalendarClock, Image as ImageIcon, TriangleAlert, UserRound, X } from "lucide-react";
+import { STATUS_STYLE, TYPE_STYLE, fmtDateTime, imageUrl, projectImages, timeLeft } from "./projectApi";
 
 export default function ProjectDetailsModal({ project, onClose }) {
   const images = projectImages(project);
@@ -13,7 +15,7 @@ export default function ProjectDetailsModal({ project, onClose }) {
   }, [onClose]);
   if (!project) return null;
 
-  const left = project.status === "Completed" || project.status === "Submitted" ? null : timeLeft(project.dueDate);
+  const left = timeLeft(project.dueDate);
   const tone = { green: "text-emerald-600", amber: "text-amber-600", red: "text-red-600", slate: "text-slate-500" };
 
   return (
@@ -23,7 +25,7 @@ export default function ProjectDetailsModal({ project, onClose }) {
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap gap-2">
               <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black ${TYPE_STYLE[project.projectType] || TYPE_STYLE.Internal}`}>{project.projectType}</span>
-              <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black ${STATUS_STYLE[project.status]}`}>{project.status}</span>
+              <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black ${STATUS_STYLE[project.status] || STATUS_STYLE.Pending}`}>{project.status === "Pending" ? "Available" : project.status}</span>
             </div>
             <h2 className="text-xl font-black text-slate-900">{project.title}</h2>
           </div>
@@ -65,24 +67,12 @@ export default function ProjectDetailsModal({ project, onClose }) {
             </div>
           )}
 
-          {project.submissionLink && (
-            <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
-              <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-indigo-700">
-                <Send size={14} /> {project.status === "Submitted" ? "Awaiting admin approval" : "Your submission"}
-              </p>
-              <p className="mb-2 text-xs text-indigo-800">{project.submittedAt ? `Sent ${fmtDateTime(project.submittedAt)}` : "Sent for review"}</p>
-              <a href={project.submissionLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100">
-                <ExternalLink size={13} /> Open link
-              </a>
-            </div>
-          )}
-
           <div>
             <p className="mb-1 text-xs font-black uppercase tracking-wide text-slate-400">Description</p>
             <p className="whitespace-pre-wrap text-sm text-slate-700">{project.description}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl bg-slate-50 p-3">
               <p className="text-[10px] font-black uppercase text-slate-400">Valid until</p>
               <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-slate-700"><CalendarClock size={13} />{fmtDateTime(project.dueDate)}</p>
@@ -91,21 +81,6 @@ export default function ProjectDetailsModal({ project, onClose }) {
             <div className="rounded-xl bg-slate-50 p-3">
               <p className="text-[10px] font-black uppercase text-slate-400">Assigned to</p>
               <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-slate-700"><UserRound size={13} />{project.assignedToName || "Not taken yet"}</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-3">
-              <p className="text-[10px] font-black uppercase text-slate-400">Started</p>
-              <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-slate-700"><Clock3 size={13} />{project.startedAt ? fmtDateTime(project.startedAt) : "Not started"}</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-3">
-              <p className="text-[10px] font-black uppercase text-slate-400">Result</p>
-              {project.status === "Completed" ? (
-                <p className={`mt-1 flex items-center gap-1.5 text-xs font-bold ${project.completedOnTime === false ? "text-amber-600" : "text-emerald-600"}`}>
-                  <CheckCircle2 size={13} />
-                  {project.completedOnTime === false ? "Late" : "On time"} · {fmtMinutes(project.completionMinutes)}
-                </p>
-              ) : (
-                <p className="mt-1 text-xs font-bold text-slate-400">Not finished</p>
-              )}
             </div>
           </div>
         </div>

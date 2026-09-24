@@ -1,11 +1,17 @@
 // =====================================================================
 // PROJECTS
 //
-//   Admin  : create (Internal / External), edit, delete, see everything,
-//            correct a status
-//   Staff  : see the project pool, take a project (self-assign, optionally
-//            start it straight away), start, complete - ONE project at a time
+//   Admin  : create (Internal / External), edit, delete, see everything
+//   Staff  : see the project pool, take a project (self-assign) - ONE at a time
 //   Everyone: the leaderboard (who completes the most projects, on time)
+//
+// A project is a CATALOG entry. The moment someone is assigned to it - by the
+// admin, or by self-assigning - a Task is created for them (see Task.Model /
+// Task.controller) and THAT is where the real work happens: starting it,
+// submitting a link, being marked complete. There is one evaluation flow, not
+// two - this controller never tracks progress itself, it only mirrors the
+// linked task's outcome back for reporting and the leaderboard (see
+// Task.controller's syncProjectFromTask).
 //
 // Every route is protected (see routers/Project.route.js). The person who is
 // acting always comes from the login token, never from the request body.
@@ -15,13 +21,12 @@ const path = require("path");
 const Project = require("../Models/Project.Model");
 const ProjectClaim = require("../Models/ProjectClaim.Model");
 const ProjectSlot = require("../Models/ProjectSlot.Model");
+const Task = require("../Models/Task.Model");
 const User = require("../Models/User.Model");
 const notify = require("../Services/notification.service");
 const { ok, fail, handle, isObjectId, httpError } = require("../Utils/http");
 
 const TYPES = ["Internal", "External"];
-const STATUSES = ["Pending", "In Progress", "Submitted", "Completed"];
-const ACTIVE = ["Pending", "In Progress", "Submitted"]; // a person can hold only one of these at a time
 const MAX_IMAGES = 10;
 const UPLOAD_PREFIX = "/uploads/projects/";
 const UPLOAD_DIR = path.join(__dirname, "../../uploads/projects");
@@ -60,20 +65,6 @@ function parseDue(value, { mustBeFuture }) {
   if (Number.isNaN(d.getTime())) throw httpError(400, "The validity time is not a valid date.");
   if (mustBeFuture && d.getTime() < Date.now() + 60 * 1000) throw httpError(400, "The validity time must be in the future.");
   return d;
-}
-
-/** A submission link (GitHub, Drive, or any other web link) must be a real, well-formed http(s) address */
-function parseLink(value) {
-  const link = clean(value, 500);
-  if (!link) throw httpError(400, "Add a link (GitHub, Drive, or any other) to the work you completed.");
-  let url;
-  try {
-    url = new URL(link);
-  } catch {
-    throw httpError(400, "That does not look like a valid link. Include the full address, e.g. https://...");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw httpError(400, "The link must start with http:// or https://");
-  return link;
 }
 
 /** Validate the text fields shared by create and edit */
@@ -115,14 +106,6 @@ async function findStaff(id) {
   return user;
 }
 
-const assignedFields = (user, by) => ({
-  assignmentType: "Admin",
-  assignedTo: user._id,
-  assignedToName: user.name,
-  assignedAt: new Date(),
-  assignedBy: by || "Admin",
-});
-
 const poolFields = () => ({
   assignmentType: "Pool",
   assignedTo: null,
@@ -135,6 +118,50 @@ const poolFields = () => ({
 const releaseClaim = (projectId) => ProjectClaim.deleteOne({ projectId }).catch(() => {});
 /** The person is no longer taking / holding a self-assigned project */
 const releaseSlot = (userId) => (userId ? ProjectSlot.deleteOne({ userId }).catch(() => {}) : Promise.resolve());
+
+/** The project's issue details folded into the task description, so nothing is lost by merging the two */
+const taskDescriptionFor = (project) => [project.issueDetails && `Error / change required: ${project.issueDetails}`, project.description].filter(Boolean).join("\n\n");
+
+/**
+ * The one and only place a project becomes real work: create the Task that will actually be
+ * tracked (started, submitted, completed), and point the project at it. From here on the
+ * project record just mirrors that task's outcome (see Task.controller's syncProjectFromTask) -
+ * nothing about progress is decided here.
+ */
+async function spawnTask(project, user, assignedBy) {
+  const now = new Date();
+  const task = await Task.create({
+    title: project.title,
+    description: taskDescriptionFor(project),
+    assignedTo: user._id,
+    assignedToName: user.name,
+    assignedBy: assignedBy || "Admin",
+    assignedAt: now,
+    dueDate: project.dueDate,
+    status: "Pending",
+    projectId: project._id,
+    projectType: project.projectType,
+  });
+  project.taskId = task._id;
+  project.assignmentType = assignedBy === "Self Assignment" ? "Self" : "Admin";
+  project.assignedTo = user._id;
+  project.assignedToName = user.name;
+  project.assignedBy = assignedBy || "Admin";
+  project.assignedAt = now;
+  project.startedAt = now;
+  project.status = "Assigned";
+  await project.save();
+
+  notify.notifyUser(user._id, {
+    category: "task",
+    type: "TASK_ASSIGNED",
+    severity: "info",
+    title: "New task assigned",
+    message: `${task.title}${task.dueDate ? ` · due ${new Date(task.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` : ""}`,
+    link: "My Tasks",
+  });
+  return task;
+}
 
 function announcePool(project) {
   User.find({ isActive: { $ne: false } })
@@ -174,33 +201,19 @@ const createProject = handle(async (req, res) => {
       images: uploaded,
       createdBy: req.admin?.name || "Admin",
       status: "Pending",
-      ...(owner ? assignedFields(owner, req.admin?.name) : poolFields()),
+      ...poolFields(),
     });
 
+    let message = `${project.projectType} project created and added to the project pool.`;
     if (owner) {
-      notify.notifyUser(owner._id, {
-        category: "project",
-        type: "PROJECT_ASSIGNED",
-        severity: "info",
-        title: "New project assigned to you",
-        message: project.title,
-        link: "My Projects",
-      });
+      await spawnTask(project, owner, req.admin?.name);
+      message = `${project.projectType} project created and added to ${owner.name}'s tasks.`;
     } else {
       announcePool(project);
     }
 
     await project.populate("assignedTo", POPULATE);
-    return ok(
-      res,
-      {
-        message: owner
-          ? `${project.projectType} project created and assigned to ${owner.name}.`
-          : `${project.projectType} project created and added to the project pool.`,
-        project,
-      },
-      201
-    );
+    return ok(res, { message, project }, 201);
   } catch (err) {
     removeFiles(uploaded); // a rejected request must not leave images behind
     throw err;
@@ -234,43 +247,32 @@ const updateProject = handle(async (req, res) => {
     const images = [...before.filter((p) => !removed.includes(p)), ...uploaded];
     if (images.length > MAX_IMAGES) throw httpError(400, `A project can have at most ${MAX_IMAGES} images.`);
 
-    // assignment: only while nobody has started it
-    let assignment = null;
-    const previousHolder = project.assignedTo;
+    // assignment: only while nobody has been assigned yet (once a task exists, manage it there)
+    let newOwnerId;
     if (req.body.assignedTo !== undefined) {
       const wanted = String(req.body.assignedTo || "");
       const currentId = project.assignedTo ? String(project.assignedTo) : "";
       if (wanted !== currentId) {
         if (project.status !== "Pending") {
-          throw httpError(409, project.status === "Completed" ? "A completed project cannot be reassigned." : `This project is already in progress with ${project.assignedToName || "someone"}. It cannot be reassigned.`);
+          throw httpError(409, project.status === "Completed" ? "A completed project cannot be reassigned." : `This project has already been assigned to ${project.assignedToName || "someone"}. Manage it from Tasks instead.`);
         }
-        assignment = wanted ? assignedFields(await findStaff(wanted), req.admin?.name) : poolFields();
+        newOwnerId = wanted || null;
       }
     }
 
     Object.assign(project, f, { images, cardImage: images[0] || "" });
-    if (assignment) Object.assign(project, assignment);
     await project.save();
     removeFiles(removing);
 
-    if (assignment) await releaseSlot(previousHolder);
-
-    if (assignment && assignment.assignedTo) {
-      notify.notifyUser(assignment.assignedTo, {
-        category: "project",
-        type: "PROJECT_ASSIGNED",
-        severity: "info",
-        title: "A project was assigned to you",
-        message: project.title,
-        link: "My Projects",
-      });
-    } else if (assignment) {
-      await releaseClaim(project._id);
-      announcePool(project);
+    let message = "Project updated successfully.";
+    if (newOwnerId) {
+      const owner = await findStaff(newOwnerId);
+      await spawnTask(project, owner, req.admin?.name);
+      message = `Project updated and added to ${owner.name}'s tasks.`;
     }
 
     await project.populate("assignedTo", POPULATE);
-    return ok(res, { message: "Project updated successfully.", project });
+    return ok(res, { message, project });
   } catch (err) {
     removeFiles(uploaded);
     throw err;
@@ -290,6 +292,12 @@ const deleteProject = handle(async (req, res) => {
   if (project.status !== "Completed") await releaseSlot(project.assignedTo);
   removeFiles(imageList(project));
 
+  // the linked task (if any, and not already completed) goes with it - nothing orphaned
+  if (project.taskId) {
+    const task = await Task.findById(project.taskId);
+    if (task && task.status !== "Completed") await Task.deleteOne({ _id: task._id });
+  }
+
   if (project.assignedTo && project.status !== "Completed") {
     notify.notifyUser(project.assignedTo, {
       category: "project",
@@ -297,7 +305,7 @@ const deleteProject = handle(async (req, res) => {
       severity: "warning",
       title: "A project was removed",
       message: `"${project.title}" was removed by the administrator.`,
-      link: "My Projects",
+      link: "My Tasks",
     });
   }
   return ok(res, { message: "Project deleted.", projectId: String(project._id) });
@@ -344,8 +352,8 @@ async function acquireSlot(userId) {
     } catch (err) {
       if (err.code !== 11000) throw err;
     }
-    const busy = await Project.findOne({ assignedTo: userId, status: { $in: ACTIVE } }).select("title");
-    if (busy) throw httpError(400, `You already have an active project ("${busy.title}"). Finish it (or wait for admin approval) before taking another one.`);
+    const busy = await Project.findOne({ assignedTo: userId, status: "Assigned" }).select("title");
+    if (busy) throw httpError(400, `You already have an active project ("${busy.title}"). Finish it (see My Tasks) before taking another one.`);
     const slot = await ProjectSlot.findOne({ userId });
     if (slot && Date.now() - new Date(slot.createdAt).getTime() > STALE_CLAIM_MS) {
       await ProjectSlot.deleteOne({ _id: slot._id });
@@ -389,12 +397,12 @@ async function claim(projectId, userId) {
 }
 
 // =====================================================================
-// TAKE A PROJECT (self-assign)  - optionally start it straight away
-//   { start: true }  = "Assign to me and start working"
+// TAKE A PROJECT (self-assign)
 //
-// Rules: it must still be in the pool, and the person must not already hold
-// an unfinished project (one at a time). It is claimed atomically, so two
-// people clicking at the same moment can never both get it.
+// It must still be in the pool, and the person must not already hold an unfinished project
+// (one at a time). It is claimed atomically, so two people clicking at the same moment can
+// never both get it. Taking it immediately creates the matching task - there is no separate
+// "started" step here, starting the actual work happens on the task.
 // =====================================================================
 const selfAssignProject = handle(async (req, res) => {
   const { projectId } = req.params;
@@ -402,12 +410,10 @@ const selfAssignProject = handle(async (req, res) => {
   const user = await User.findById(req.actor.id);
   if (!user || user.isActive === false) throw httpError(403, "Your account cannot take projects.");
 
-  const busy = await Project.findOne({ assignedTo: user._id, status: { $in: ACTIVE } }).select("title status");
+  const busy = await Project.findOne({ assignedTo: user._id, status: "Assigned" }).select("title");
   if (busy) {
-    return fail(res, 400, `You already have an active project ("${busy.title}"). Finish it (or wait for admin approval) before taking another one.`, { activeProject: busy });
+    return fail(res, 400, `You already have an active project ("${busy.title}"). Finish it (see My Tasks) before taking another one.`, { activeProject: busy });
   }
-
-  const start = req.body?.start === true || req.body?.start === "true";
 
   // 1) my slot (one project at a time), then the claim on the project itself:
   //    the unique indexes let exactly ONE request through, however many click at once
@@ -420,20 +426,9 @@ const selfAssignProject = handle(async (req, res) => {
   }
 
   // 2) the claim is ours: take the project
-  const now = new Date();
   const project = await Project.findOneAndUpdate(
     { _id: projectId, assignedTo: null, assignmentType: "Pool", status: "Pending" },
-    {
-      $set: {
-        assignmentType: "Self",
-        assignedTo: user._id,
-        assignedToName: user.name,
-        assignedAt: now,
-        assignedBy: "Self Assignment",
-        status: start ? "In Progress" : "Pending",
-        startedAt: start ? now : null,
-      },
-    },
+    { $set: { assignmentType: "Self", assignedTo: user._id, assignedToName: user.name } },
     { returnDocument: "after" }
   );
 
@@ -446,155 +441,28 @@ const selfAssignProject = handle(async (req, res) => {
     throw httpError(400, "This project is not available for self-assignment.");
   }
 
+  // 3) two DIFFERENT projects taken at the very same moment: only the first one is kept
+  const holding = await Project.find({ assignedTo: user._id, status: "Assigned" }).sort({ createdAt: 1, _id: 1 }).select("_id");
+  if (holding.length > 1 && String(holding[0]._id) !== String(project._id)) {
+    await Project.updateOne({ _id: project._id, assignedTo: user._id }, { $set: poolFields() });
+    await releaseClaim(project._id);
+    throw httpError(409, "You already have an active project. Complete it before taking another one.");
+  }
+
+  await spawnTask(project, user, "Self Assignment");
+
   notify.notifyAdmins({
     category: "project",
     type: "PROJECT_TAKEN",
     severity: "info",
-    title: `${user.name} ${start ? "started" : "took"} a project`,
+    title: `${user.name} took a project`,
     message: `${project.title} (${project.projectType})`,
-    link: "Projects",
+    link: "Tasks",
     dedupeKey: `proj-take:${project._id}:${user._id}`,
   });
 
   await project.populate("assignedTo", POPULATE);
-  return ok(res, { message: start ? "Project assigned to you and started. Good luck!" : "Project assigned to you.", project });
-});
-
-// =====================================================================
-// START  (the person who holds it)
-// =====================================================================
-const startProject = handle(async (req, res) => {
-  const { projectId } = req.params;
-  if (!isObjectId(projectId)) throw httpError(400, "Invalid project.");
-  const project = await Project.findById(projectId);
-  if (!project) throw httpError(404, "Project not found.");
-  if (!project.assignedTo || String(project.assignedTo) !== String(req.actor.id)) throw httpError(403, "You are not authorized to start this project.");
-  if (project.status === "Completed") throw httpError(400, "A completed project cannot be started again.");
-  if (project.status === "In Progress") return ok(res, { message: "This project is already in progress.", project });
-
-  project.status = "In Progress";
-  project.startedAt = new Date();
-  await project.save();
-  return ok(res, { message: "Project started successfully.", project });
-});
-
-// =====================================================================
-// SUBMIT FOR REVIEW  (the person who holds it)
-//
-// Staff no longer mark their own project Completed. Instead they submit a link to their
-// work (GitHub, Drive, or anything else); an admin opens it, checks it, and only the admin
-// can then mark the project Completed (or send it back for changes).
-// =====================================================================
-const submitProject = handle(async (req, res) => {
-  const { projectId } = req.params;
-  if (!isObjectId(projectId)) throw httpError(400, "Invalid project.");
-  const project = await Project.findById(projectId);
-  if (!project) throw httpError(404, "Project not found.");
-  if (!project.assignedTo || String(project.assignedTo) !== String(req.actor.id)) throw httpError(403, "You are not authorized to submit this project.");
-  if (project.status === "Completed") throw httpError(400, "This project is already completed.");
-  if (project.status === "Submitted") throw httpError(400, "This project is already submitted and waiting for admin review.");
-  if (project.status !== "In Progress") throw httpError(400, "Start working on the project before submitting it.");
-
-  const link = parseLink(req.body?.link);
-  project.status = "Submitted";
-  project.submissionLink = link;
-  project.submittedAt = new Date();
-  await project.save();
-
-  notify.notifyAdmins({
-    category: "project",
-    type: "PROJECT_SUBMITTED",
-    severity: "info",
-    title: `${project.assignedToName || "Someone"} submitted work for review`,
-    message: project.title,
-    link: "Projects",
-  });
-
-  await project.populate("assignedTo", POPULATE);
-  return ok(res, { message: "Submitted for admin review. You will be told once it is checked.", project });
-});
-
-// =====================================================================
-// STATUS  (the person who holds it: forward only, and never straight to
-// Completed - that needs an admin's approval; an admin can correct anything)
-// =====================================================================
-const updateProjectStatus = handle(async (req, res) => {
-  const { projectId } = req.params;
-  const { status } = req.body || {};
-  if (!isObjectId(projectId)) throw httpError(400, "Invalid project.");
-  if (!STATUSES.includes(status)) throw httpError(400, "Invalid project status.");
-  const project = await Project.findById(projectId);
-  if (!project) throw httpError(404, "Project not found.");
-
-  const admin = isAdmin(req);
-  if (!admin && (!project.assignedTo || String(project.assignedTo) !== String(req.actor.id))) {
-    throw httpError(403, "You are not authorized to update this project.");
-  }
-  if (!project.assignedTo && status !== "Pending") throw httpError(400, "Assign the project to a staff member first.");
-
-  const from = project.status;
-  if (from === status) return ok(res, { message: "Project status updated successfully.", project });
-
-  if (!admin) {
-    if (status === "Submitted") throw httpError(400, "Submit your work with a link, so an admin can review it.");
-    if (status === "Completed") throw httpError(400, "Only an admin can mark a project completed, after reviewing your submission.");
-    const forward = from === "Pending" && status === "In Progress";
-    if (!forward) throw httpError(400, `A project cannot go back from ${from} to ${status}. Ask an administrator.`);
-  }
-
-  const now = new Date();
-  project.status = status;
-  if (status === "Pending") {
-    project.startedAt = null;
-  } else if (!project.startedAt) {
-    project.startedAt = now;
-  }
-
-  if (status === "Completed") {
-    // "On time" is judged by when the staff member actually finished (submitted), not by
-    // how quickly the admin got round to approving it.
-    const finishedAt = from === "Submitted" && project.submittedAt ? new Date(project.submittedAt) : now;
-    project.completedAt = now;
-    project.completedOnTime = project.dueDate ? finishedAt.getTime() <= new Date(project.dueDate).getTime() : null;
-    project.completionMinutes = Math.max(0, Math.round((finishedAt.getTime() - new Date(project.startedAt).getTime()) / 60000));
-  } else {
-    // moved out of Completed by an administrator: the result no longer counts
-    project.completedAt = null;
-    project.completedOnTime = null;
-    project.completionMinutes = null;
-  }
-
-  // sent back from Submitted without approving it: clear the old link, the resubmission must be fresh
-  const sentBack = from === "Submitted" && status !== "Completed";
-  if (sentBack) {
-    project.submissionLink = "";
-    project.submittedAt = null;
-  }
-
-  await project.save();
-  if (status === "Completed") await releaseSlot(project.assignedTo);
-
-  if (status === "Completed" && project.assignedTo) {
-    notify.notifyUser(project.assignedTo, {
-      category: "project",
-      type: "PROJECT_APPROVED",
-      severity: project.completedOnTime === false ? "warning" : "success",
-      title: "Your submission was approved",
-      message: `${project.title} - ${project.completedOnTime === false ? "marked completed (after the validity time)" : "marked completed on time"}.`,
-      link: "My Projects",
-    });
-  } else if (sentBack && project.assignedTo) {
-    notify.notifyUser(project.assignedTo, {
-      category: "project",
-      type: "PROJECT_SENT_BACK",
-      severity: "warning",
-      title: "Your submission needs changes",
-      message: `${project.title} - please review it and submit again.`,
-      link: "My Projects",
-    });
-  }
-  await project.populate("assignedTo", POPULATE);
-  return ok(res, { message: "Project status updated successfully.", project });
+  return ok(res, { message: "Successfully added to your tasks. Find it under My Tasks.", project });
 });
 
 // =====================================================================
@@ -609,9 +477,7 @@ const getUserProjectStats = handle(async (req, res) => {
   return ok(res, {
     stats: {
       total: projects.length,
-      pending: count((p) => p.status === "Pending"),
-      inProgress: count((p) => p.status === "In Progress"),
-      submitted: count((p) => p.status === "Submitted"),
+      assigned: count((p) => p.status === "Assigned"),
       completed: count((p) => p.status === "Completed"),
       onTime: count((p) => p.status === "Completed" && p.completedOnTime !== false),
       late: count((p) => p.status === "Completed" && p.completedOnTime === false),
@@ -624,7 +490,8 @@ const getUserProjectStats = handle(async (req, res) => {
 //   ?type=Internal|External   (default: all)
 //   ?period=all|month|week    (which completions count; default: all)
 //
-// Points: 10 for every project completed on time, 5 for a late one.
+// Points: 10 for every project completed on time, 5 for a late one. The completion itself is
+// decided on the linked task (see Task.controller) and mirrored here - this just reports it.
 // Rank: points, then completed, then the quickest average time.
 // =====================================================================
 const POINTS_ON_TIME = 10;
@@ -645,7 +512,7 @@ const getLeaderboard = handle(async (req, res) => {
   const period = ["week", "month"].includes(req.query.period) ? req.query.period : "all";
   const since = periodStart(period);
   const [projects, staff] = await Promise.all([
-    Project.find(typeFilter(req.query)).select("assignedTo status dueDate completedAt completedOnTime completionMinutes assignmentType").lean(),
+    Project.find(typeFilter(req.query)).select("assignedTo status dueDate completedAt completedOnTime completionMinutes").lean(),
     User.find({ isActive: { $ne: false } }).select("name role").lean(),
   ]);
 
@@ -653,15 +520,13 @@ const getLeaderboard = handle(async (req, res) => {
     staff.map((u) => [String(u._id), { userId: u._id, name: u.name, role: u.role || "", assigned: 0, active: 0, completed: 0, onTime: 0, late: 0, minutes: 0, timed: 0 }])
   );
   const now = Date.now();
-  const team = { total: projects.length, available: 0, pending: 0, inProgress: 0, submitted: 0, completed: 0, overdue: 0 };
+  const team = { total: projects.length, available: 0, assigned: 0, completed: 0, overdue: 0 };
 
   for (const p of projects) {
     if (p.status === "Completed") team.completed += 1;
-    else if (p.status === "Submitted") team.submitted += 1;
-    else if (p.status === "In Progress") team.inProgress += 1;
-    else if (p.assignedTo) team.pending += 1;
+    else if (p.status === "Assigned") team.assigned += 1;
     else team.available += 1;
-    if (p.status !== "Completed" && p.dueDate && new Date(p.dueDate).getTime() < now) team.overdue += 1;
+    if (p.status === "Assigned" && p.dueDate && new Date(p.dueDate).getTime() < now) team.overdue += 1;
 
     const row = p.assignedTo ? rows.get(String(p.assignedTo)) : null;
     if (!row) continue;
@@ -716,9 +581,9 @@ module.exports = {
   getUserProjects,
   getProjectPool,
   selfAssignProject,
-  startProject,
-  submitProject,
-  updateProjectStatus,
   getUserProjectStats,
   getLeaderboard,
+  // shared with Task.controller so a linked task's outcome can be mirrored back
+  spawnTask,
+  releaseSlot,
 };

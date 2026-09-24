@@ -93,15 +93,11 @@ export default function ProjectLeaderboard({ role = "user", compact = false }) {
             </div>
             <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuenow={team.percentComplete} aria-valuemin={0} aria-valuemax={100} aria-label="Team progress">
               <div className="bg-emerald-500 transition-all" style={{ width: seg(team.completed) }} />
-              <div className="bg-indigo-500 transition-all" style={{ width: seg(team.submitted) }} />
-              <div className="bg-sky-500 transition-all" style={{ width: seg(team.inProgress) }} />
-              <div className="bg-amber-400 transition-all" style={{ width: seg(team.pending) }} />
+              <div className="bg-indigo-500 transition-all" style={{ width: seg(team.assigned) }} />
             </div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] font-semibold text-slate-500">
               <span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-500" />Completed {team.completed}</span>
-              <span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-indigo-500" />Awaiting review {team.submitted}</span>
-              <span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-sky-500" />In progress {team.inProgress}</span>
-              <span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-amber-400" />Taken, not started {team.pending}</span>
+              <span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-indigo-500" />Assigned, as tasks {team.assigned}</span>
               <span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-slate-300" />Available {team.available}</span>
               {team.overdue > 0 && <span className="text-red-600">Overdue {team.overdue}</span>}
             </div>

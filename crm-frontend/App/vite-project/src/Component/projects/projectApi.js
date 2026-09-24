@@ -108,7 +108,6 @@ export const TYPE_STYLE = {
 };
 export const STATUS_STYLE = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",
-  "In Progress": "bg-sky-50 text-sky-700 border-sky-200",
-  Submitted: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  Assigned: "bg-indigo-50 text-indigo-700 border-indigo-200",
   Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };

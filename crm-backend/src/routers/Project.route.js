@@ -23,9 +23,11 @@ const uploadImages = (req, res, next) =>
     return res.status(400).json({ success: false, message });
   });
 
-// ---------------- admin ----------------
+// ---------------- admin: create / edit / delete / see everything ----------------
 router.post("/create-project", anyAuth.adminOnly, uploadImages, c.createProject);
 router.get("/get-all-projects", anyAuth.adminOnly, c.getAllProjects);
+router.put("/:projectId", anyAuth.adminOnly, uploadImages, c.updateProject);
+router.delete("/:projectId", anyAuth.adminOnly, c.deleteProject);
 
 // ---------------- staff (and admin) ----------------
 // IMPORTANT: fixed paths must come BEFORE "/:projectId"
@@ -34,15 +36,9 @@ router.get("/leaderboard", anyAuth, c.getLeaderboard);
 router.get("/user/:userId", anyAuth, c.getUserProjects);
 router.get("/stats/:userId", anyAuth, c.getUserProjectStats);
 
-// staff take a project from the pool (optionally starting it), start it, submit it for review
+// Staff take a project from the pool. This immediately creates the matching task (see
+// Task.route's own endpoints) - there is nothing further to do on the project itself:
+// starting it, submitting a link, being marked complete all happen on that task.
 router.put("/self-assign/:projectId", anyAuth.userOnly, c.selfAssignProject);
-router.put("/start/:projectId", anyAuth.userOnly, c.startProject);
-router.put("/submit/:projectId", anyAuth.userOnly, c.submitProject);
-// the person who holds it moves it forward (never straight to Completed); an admin can correct any status
-router.put("/update-status/:projectId", anyAuth, c.updateProjectStatus);
-
-// ---------------- admin: edit / delete one project ----------------
-router.put("/:projectId", anyAuth.adminOnly, uploadImages, c.updateProject);
-router.delete("/:projectId", anyAuth.adminOnly, c.deleteProject);
 
 module.exports = router;

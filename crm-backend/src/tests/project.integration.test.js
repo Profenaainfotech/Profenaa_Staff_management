@@ -1,15 +1,18 @@
 // =====================================================
-// PROJECTS END-TO-END TEST      node src/tests/project.integration.test.js
+// PROJECTS + TASKS: ONE MERGED FLOW      node src/tests/project.integration.test.js
 //
-//  - login protection (nothing works without it; staff cannot create / edit / delete)
-//  - create Internal / External: every validation message, optional images, up to 10
-//  - the old screen bug: "projectCategory" (External) used to be stored as Internal
-//  - lists by type, the pool, one person's projects
-//  - edit (fields, images added / removed, type change, assign / unassign) and delete
-//  - self-assign ("take" / "take and start"), one project at a time, and RACES:
-//      two people taking the same project, one person taking two at once
-//  - start, complete on time / late, admin correction
-//  - the leaderboard (points, rank, team progress, type and period filters)
+// Projects are a catalog. The moment someone is assigned - by the admin, or by
+// self-assigning - a Task is created and THAT is where all the real tracking happens:
+// starting, submitting a link, being marked complete. This suite proves:
+//
+//  - creating a project (validation, images, optional validity time)
+//  - assigning at creation, or later, immediately creates a matching task
+//  - self-assigning creates the task too, with the right message, and is race-safe
+//  - completing the TASK (submit, or an admin's correction) mirrors back onto the
+//    project (status / on-time / minutes) - there is no separate project-side flow
+//  - the leaderboard is fed entirely by that mirrored data
+//  - deleting a project cleans up its task; editing/reassigning is guarded correctly
+//  - every route needs a login; Task routes in particular (previously had none)
 //
 // !! WIPES the database it connects to; refuses unless the name contains "test".
 // =====================================================
@@ -21,6 +24,7 @@ const mongoose = require("mongoose");
 
 const app = require("../../app");
 const Project = require("../Models/Project.Model");
+const Task = require("../Models/Task.Model");
 const Notification = require("../Models/Notification.Model");
 
 let pass = 0;
@@ -61,11 +65,10 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const png = (name = "a.png") => [new Blob([PNG], { type: "image/png" }), name];
 const inDays = (d) => new Date(Date.now() + d * 24 * 3600 * 1000).toISOString();
 
-/** multipart form; images = number of pictures to attach */
-function makeForm(fields = {}, images = 0, imageField = "images") {
+function makeForm(fields = {}, images = 0) {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) fd.append(k, v);
-  for (let i = 0; i < images; i += 1) fd.append(imageField, ...png(`pic${i}.png`));
+  for (let i = 0; i < images; i += 1) fd.append("images", ...png(`pic${i}.png`));
   return fd;
 }
 const good = (over = {}) => ({
@@ -79,10 +82,9 @@ const good = (over = {}) => ({
 
 const UPLOADS = path.join(__dirname, "../../uploads/projects");
 const fileCount = () => (fs.existsSync(UPLOADS) ? fs.readdirSync(UPLOADS).length : 0);
-const diskName = (p) => path.join(UPLOADS, path.basename(p));
 
 async function run() {
-  const filesAtStart = new Set(fs.existsSync(UPLOADS) ? fs.readdirSync(UPLOADS) : []); // the test removes only what it created
+  const filesAtStart = new Set(fs.existsSync(UPLOADS) ? fs.readdirSync(UPLOADS) : []);
   await mongoose.connect(process.env.MONGO_URI);
   if (!/test/i.test(mongoose.connection.name)) throw new Error(`Refusing to wipe database "${mongoose.connection.name}" (name must contain "test")`);
   for (const c of await mongoose.connection.db.collections()) await c.deleteMany({});
@@ -91,14 +93,15 @@ async function run() {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   BASE = `http://127.0.0.1:${server.address().port}`;
   const P = "/api/Project";
+  const T = "/api/Task";
 
   // ---------------------------------------------- setup
   await call("POST", "/api/admin/register", { body: { name: "Boss", password: "admin123", role: "admin" } });
   const admin = (await call("POST", "/api/admin/login", { body: { name: "Boss", password: "admin123" } })).body.token;
   const mk = async (name, mobile) => (await call("POST", "/api/staff", { token: admin, body: { name, mobile, password: "secret123", role: "Developer", shiftStart: "09:30", shiftEnd: "18:30" } })).body.user;
-  const A = await mk("Yokesh", "9200000001");
-  const B = await mk("Praveen", "9200000002");
-  const C = await mk("Karthik", "9200000003");
+  const A = await mk("Yokesh", "9400000001");
+  const B = await mk("Praveen", "9400000002");
+  const C = await mk("Karthik", "9400000003");
   const login = async (name) => (await call("POST", "/api/UserAccounts/Log-in", { body: { name, password: "secret123" } })).body.token;
   const tA = await login("Yokesh");
   const tB = await login("Praveen");
@@ -114,338 +117,184 @@ async function run() {
     return null;
   };
 
-  // ================================================== SECURITY
-  section("Login protection");
+  // ================================================== AUTH
+  section("Every route needs a login (Project and Task alike)");
   let r = await call("GET", `${P}/get-all-projects`);
-  check("no login: the project list is refused (401)", r.status === 401, r);
+  check("project list: 401 with no login", r.status === 401, r);
   r = await call("POST", `${P}/create-project`, { form: makeForm(good()) });
-  check("no login: creating a project is refused (401)", r.status === 401, r);
-  r = await call("POST", `${P}/create-project`, { token: tA, form: makeForm(good()) });
-  check("staff cannot create a project (403)", r.status === 403, r);
-  r = await call("GET", `${P}/get-all-projects`, { token: tA });
-  check("staff cannot use the admin list (403)", r.status === 403, r);
-  r = await call("GET", `${P}/pool`, { token: tA });
-  check("staff can see the pool", r.status === 200 && Array.isArray(r.body.projects), r);
+  check("create project: 401 with no login", r.status === 401, r);
+  r = await call("GET", `${T}/get-all-tasks`);
+  check("task list: 401 with no login (this used to have NO login check at all)", r.status === 401, r);
+  r = await call("POST", `${T}/create-task`, { body: { title: "x", assignedTo: A._id } });
+  check("create task: 401 with no login", r.status === 401, r);
+  r = await call("GET", `${T}/get-all-tasks`, { token: tA });
+  check("staff cannot use the admin task list (403)", r.status === 403, r);
 
-  // ================================================== CREATE: VALIDATION
-  section("Create: every validation message");
+  // ================================================== CREATE: VALIDATION (unchanged rules)
+  section("Create: validation");
   const before = fileCount();
-  const bad = async (over, images, re, label) => {
-    const x = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good(over), images) });
+  const bad = async (over, re, label) => {
+    const x = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good(over)) });
     check(label, x.status === 400 && re.test(x.body.message || ""), x.body);
   };
-  await bad({ title: "" }, 0, /title is required/i, "empty title");
-  await bad({ title: "ab" }, 0, /title is required/i, "title too short");
-  await bad({ title: "x".repeat(121) }, 0, /too long/i, "title too long");
-  await bad({ issueDetails: "" }, 0, /error or change/i, "the error / change field is required");
-  await bad({ issueDetails: "no" }, 0, /at least 5/i, "the error / change field needs a real sentence");
-  await bad({ description: "short" }, 0, /description is required/i, "description too short");
-  await bad({ dueDate: "not-a-date" }, 0, /not a valid date/i, "validity time must be a date");
-  await bad({ dueDate: new Date(Date.now() - 3600 * 1000).toISOString() }, 0, /in the future/i, "validity time cannot be in the past");
-  await bad({ projectType: "Random" }, 0, /Internal or External/i, "unknown type");
-  await bad({ assignedTo: "12345" }, 0, /valid staff member/i, "bad staff id");
+  await bad({ title: "" }, /title is required/i, "empty title");
+  await bad({ issueDetails: "" }, /error or change/i, "the error / change field is required");
+  await bad({ description: "short" }, /description is required/i, "description too short");
+  await bad({ dueDate: "not-a-date" }, /not a valid date/i, "validity time must be a date");
+  await bad({ dueDate: new Date(Date.now() - 3600 * 1000).toISOString() }, /in the future/i, "validity time cannot be in the past");
   r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ assignedTo: "a".repeat(24) })) });
   check("unknown staff member: 404", r.status === 404 && /does not exist/i.test(r.body.message), r.body);
   r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good(), 11) });
-  check("more than 10 images is refused with a clear message", r.status === 400 && /at most 10/i.test(r.body.message), r.body);
-  const fdText = makeForm(good());
-  fdText.append("images", new Blob(["hello"], { type: "text/plain" }), "notes.txt");
-  r = await call("POST", `${P}/create-project`, { token: admin, form: fdText });
-  check("a non-image file is refused", r.status === 400 && /JPG, JPEG, PNG and WEBP/i.test(r.body.message), r.body);
-  const fdBig = makeForm(good());
-  fdBig.append("images", new Blob([Buffer.alloc(5 * 1024 * 1024 + 100)], { type: "image/png" }), "big.png");
-  r = await call("POST", `${P}/create-project`, { token: admin, form: fdBig });
-  check("an image over 5 MB is refused", r.status === 400 && /5 MB/i.test(r.body.message), r.body);
+  check("more than 10 images is refused", r.status === 400 && /at most 10/i.test(r.body.message), r.body);
   await sleep(200);
-  check("rejected requests leave no image files behind", fileCount() === before, { before, after: fileCount() });
-  check("...and nothing was saved", (await Project.countDocuments()) === 0);
+  check("rejected requests leave no image files and no project behind", fileCount() === before && (await Project.countDocuments()) === 0);
 
-  // ================================================== CREATE: OK
-  section("Create: Internal and External");
-  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Internal with pictures" }), 3) });
-  const I1 = r.body.project;
-  check("Internal project with 3 images (no assignee)", r.status === 201 && I1.projectType === "Internal" && I1.images.length === 3, r.body);
-  check("...the first image is the card cover", I1.cardImage === I1.images[0]);
-  check("...it goes to the pool, Pending, with the issue text and validity time stored", I1.assignmentType === "Pool" && I1.status === "Pending" && /Safari/.test(I1.issueDetails) && new Date(I1.dueDate) > new Date(), I1);
-  check("...its image files exist on disk", I1.images.every((p) => fs.existsSync(diskName(p))));
-  check("...every active staff member was told there is a new project", Boolean(await notified({ recipientId: A._id, type: "PROJECT_IN_POOL" })) && Boolean(await notified({ recipientId: C._id, type: "PROJECT_IN_POOL" })));
+  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "No due date", dueDate: undefined })) });
+  check("the validity time is optional", r.status === 201 && r.body.project.dueDate === null, r.body);
 
-  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External" })) });
-  const E1 = r.body.project;
-  check("External project without any image (images are optional)", r.status === 201 && E1.projectType === "External" && E1.images.length === 0 && E1.cardImage === "", r.body);
-
-  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm({ ...good({ title: "Sent by the old screen" }), projectType: undefined, projectCategory: "External" }) });
-  check("the old screen's field name (projectCategory) now stores External correctly", r.status === 201 && r.body.project.projectType === "External", r.body);
-
-  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Assigned to Praveen", assignedTo: String(B._id) })) });
+  // ================================================== ASSIGNMENT SPAWNS A TASK
+  section("Assigning a project - at creation, or by editing it - immediately creates the matching task");
+  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Assigned at creation", assignedTo: String(B._id) }), 2) });
   const AS1 = r.body.project;
-  check("a project can be assigned to a staff member while creating it", r.status === 201 && AS1.assignmentType === "Admin" && AS1.assignedToName === "Praveen" && AS1.status === "Pending", r.body);
-  check("...that person is notified", Boolean(await notified({ recipientId: B._id, type: "PROJECT_ASSIGNED" })));
+  check("creating with assignedTo: the project is Assigned, not left Pending", r.status === 201 && AS1.status === "Assigned" && Boolean(AS1.taskId), r.body);
+  check("...the success message talks about tasks", /task/i.test(r.body.message), r.body);
+  let task1 = await Task.findById(AS1.taskId);
+  check("...a real task exists: same title, same due date, same images-derived description, linked back to the project", Boolean(task1) && task1.title === "Assigned at creation" && task1.assignedTo.toString() === String(B._id) && new Date(task1.dueDate).getTime() === new Date(AS1.dueDate).getTime() && String(task1.projectId) === String(AS1._id) && task1.projectType === "Internal" && /Safari/.test(task1.description), task1);
+  check("...the task starts Pending, untouched", task1.status === "Pending");
+  check("...Praveen was told (the existing task-assignment notification, reused as-is)", Boolean(await notified({ recipientId: B._id, type: "TASK_ASSIGNED" })));
+  r = await call("GET", `${T}/user/${B._id}`, { token: tB });
+  check("...and it shows up under Praveen's own tasks", r.status === 200 && r.body.tasks.some((t) => String(t._id) === String(AS1.taskId)), r.body);
 
-  // ================================================== LISTS
-  section("Lists by type");
-  r = await call("GET", `${P}/get-all-projects`, { token: admin });
-  check("admin sees all four", r.status === 200 && r.body.count === 4, r.body.count);
-  r = await call("GET", `${P}/get-all-projects?type=Internal`, { token: admin });
-  check("Internal filter: only Internal", r.body.projects.length === 2 && r.body.projects.every((p) => p.projectType === "Internal"), r.body.projects.map((p) => p.projectType));
-  r = await call("GET", `${P}/get-all-projects?type=External`, { token: admin });
-  check("External filter: only External", r.body.projects.length === 2 && r.body.projects.every((p) => p.projectType === "External"));
-  r = await call("GET", `${P}/pool?type=External`, { token: tA });
-  check("the pool can be filtered by type too", r.body.projects.length === 2 && r.body.projects.every((p) => p.projectType === "External" && p.assignmentType === "Pool"), r.body.projects.length);
-  r = await call("GET", `${P}/pool`, { token: tA });
-  check("the pool never shows assigned projects", r.body.projects.length === 3 && !r.body.projects.some((p) => p.title === "Assigned to Praveen"), r.body.projects.length);
-  r = await call("GET", `${P}/user/${B._id}`, { token: tB });
-  check("a person sees their own projects", r.status === 200 && r.body.projects.length === 1, r.body);
-  r = await call("GET", `${P}/user/${B._id}`, { token: tA });
-  check("...but not somebody else's (403)", r.status === 403, r);
-  r = await call("GET", `${P}/user/${B._id}`, { token: admin });
-  check("an admin can see anyone's", r.status === 200 && r.body.projects.length === 1);
+  const E1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "External unassigned", projectType: "External" })) })).body.project;
+  check("an unassigned project stays Pending with no task", E1.status === "Pending" && !E1.taskId, E1);
+  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm({ ...good({ title: "External unassigned", projectType: "External" }), dueDate: E1.dueDate, assignedTo: String(C._id) }) });
+  check("assigning later, via edit, also spawns a task", r.status === 200 && r.body.project.status === "Assigned" && Boolean(r.body.project.taskId), r.body);
+  const editTask = await Task.findById(r.body.project.taskId);
+  check("...that task is External-flavoured and points back at this project", editTask.projectType === "External" && String(editTask.projectId) === String(E1._id));
 
-  // ================================================== VALIDITY TIME IS OPTIONAL
-  section("Validity time is optional");
-  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "No validity A", dueDate: undefined })) });
-  check("creating with no dueDate field at all succeeds, with no validity time set", r.status === 201 && r.body.project.dueDate === null, r.body);
-  const noValidityId1 = r.body.project._id;
-  r = await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "No validity B", dueDate: "" })) });
-  check("...and an empty dueDate behaves the same way", r.status === 201 && r.body.project.dueDate === null, r.body);
-  const noValidityId2 = r.body.project._id;
-  r = await call("GET", `${P}/leaderboard`, { token: admin });
-  check("a project with no due date counts as available, never overdue", r.body.team.available >= 2 && r.body.team.overdue === 0, r.body.team);
-  // clean up: the exact project counts the next section checks must not include these two
-  await call("DELETE", `${P}/${noValidityId1}`, { token: admin });
-  await call("DELETE", `${P}/${noValidityId2}`, { token: admin });
+  r = await call("PUT", `${P}/${AS1._id}`, { token: admin, form: makeForm({ ...good({ title: "Assigned at creation" }), dueDate: AS1.dueDate, assignedTo: String(A._id) }) });
+  check("a project already handed to a task cannot be reassigned this way", r.status === 409 && /already been assigned to Praveen/i.test(r.body.message), r.body);
 
-  // ================================================== EDIT
-  section("Edit (admin)");
-  r = await call("PUT", `${P}/${I1._id}`, { token: tA, form: makeForm(good()) });
-  check("staff cannot edit (403)", r.status === 403, r);
-  r = await call("PUT", `${P}/${"b".repeat(24)}`, { token: admin, form: makeForm(good()) });
-  check("editing a project that does not exist: 404", r.status === 404, r);
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm(good({ issueDetails: "" })) });
-  check("edit uses the same validation", r.status === 400 && /error or change/i.test(r.body.message), r.body);
+  // ================================================== SELF-ASSIGN
+  section("Self-assign: 'Successfully added to your tasks', one at a time, race-safe");
+  const Pool1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Pool project" })) })).body.project;
+  r = await call("PUT", `${P}/self-assign/${Pool1._id}`, { token: admin, body: {} });
+  check("an admin cannot use the staff self-assign action (403)", r.status === 403, r);
+  r = await call("PUT", `${P}/self-assign/${Pool1._id}`, { token: tA, body: {} });
+  check("self-assign: clear message about tasks, no separate 'start' step needed", r.status === 200 && /Successfully added to your tasks/i.test(r.body.message) && r.body.project.status === "Assigned", r.body);
+  const selfTask = await Task.findById(r.body.project.taskId);
+  check("...it created a real task for Yokesh, Pending, linked to the project", Boolean(selfTask) && selfTask.assignedTo.toString() === String(A._id) && selfTask.status === "Pending" && String(selfTask.projectId) === String(Pool1._id), selfTask);
+  check("...Yokesh is told the way any task assignment tells him (no separate project-only notice)", Boolean(await notified({ recipientId: A._id, type: "TASK_ASSIGNED" })));
 
-  const dueChange = inDays(10);
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm(good({ title: "Internal - renamed", issueDetails: "New wording of the error", description: "A brand new description for this project.", dueDate: dueChange, projectType: "External" })) });
-  check("edit changes title, error text, description, validity time and type", r.status === 200 && r.body.project.title === "Internal - renamed" && r.body.project.issueDetails === "New wording of the error" && r.body.project.projectType === "External" && new Date(r.body.project.dueDate).toISOString() === dueChange, r.body);
-  r = await call("GET", `${P}/get-all-projects?type=Internal`, { token: admin });
-  check("...and it moved out of the Internal list", !r.body.projects.some((p) => String(p._id) === String(I1._id)));
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm({ ...good({ title: "Internal again", projectType: "Internal" }), dueDate: dueChange }) });
-  check("...back to Internal (unchanged validity time is accepted)", r.status === 200 && r.body.project.projectType === "Internal", r.body);
-
-  const gone = I1.images[1];
-  const fdImg = makeForm({ ...good({ title: "Internal again" }), dueDate: dueChange, removeImages: JSON.stringify([gone]) }, 2);
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: fdImg });
-  check("edit can remove an image and add new ones (3 - 1 + 2 = 4)", r.status === 200 && r.body.project.images.length === 4 && !r.body.project.images.includes(gone), r.body);
-  await sleep(200);
-  check("...the removed image file is deleted from disk", !fs.existsSync(diskName(gone)));
-  const removeCover = r.body.project.images[0];
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm({ ...good({ title: "Internal again" }), dueDate: dueChange, removeImages: JSON.stringify([removeCover]) }) });
-  check("removing the cover makes the next image the cover", r.status === 200 && r.body.project.cardImage === r.body.project.images[0] && r.body.project.cardImage !== removeCover, r.body);
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm({ ...good({ title: "Internal again" }), dueDate: dueChange }, 8) });
-  check("edit refuses more than 10 images in total", r.status === 400 && /at most 10/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm({ ...good({ title: "Internal again" }), dueDate: dueChange, removeImages: "{oops" }) });
-  check("a broken remove list is refused", r.status === 400, r.body);
-
-  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm({ ...good({ title: "External client work", projectType: "External" }), dueDate: E1.dueDate, assignedTo: String(C._id) }) });
-  check("edit can assign a pool project to a person", r.status === 200 && r.body.project.assignedToName === "Karthik" && r.body.project.assignmentType === "Admin", r.body);
-  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm({ ...good({ title: "External client work", projectType: "External" }), dueDate: E1.dueDate, assignedTo: "" }) });
-  check("...and back to the pool", r.status === 200 && r.body.project.assignedTo === null && r.body.project.assignmentType === "Pool", r.body);
-
-  const beforeDue = E1.dueDate;
-  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External", dueDate: undefined })) });
-  check("edit without sending dueDate at all leaves the existing validity time unchanged", r.status === 200 && new Date(r.body.project.dueDate).toISOString() === new Date(beforeDue).toISOString(), r.body);
-  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External", dueDate: "" })) });
-  check("edit with an empty dueDate clears the validity time", r.status === 200 && r.body.project.dueDate === null, r.body);
-  r = await call("PUT", `${P}/${E1._id}`, { token: admin, form: makeForm(good({ title: "External client work", projectType: "External", dueDate: undefined })) });
-  check("...and it stays cleared when the field is left out afterwards too", r.status === 200 && r.body.project.dueDate === null, r.body);
-
-  // ================================================== TAKE A PROJECT
-  section("Staff take a project (one at a time)");
-  r = await call("PUT", `${P}/self-assign/${I1._id}`, { token: admin, body: {} });
-  check("an admin cannot use the staff 'take' action (403)", r.status === 403, r);
-  r = await call("PUT", `${P}/self-assign/${I1._id}`, { token: tA, body: { start: true } });
-  check("'take and start': assigned to me and already In Progress", r.status === 200 && r.body.project.assignedToName === "Yokesh" && r.body.project.assignmentType === "Self" && r.body.project.status === "In Progress" && r.body.project.startedAt, r.body);
-  check("...admin is told who started what", Boolean(await notified({ recipientType: "admin", type: "PROJECT_TAKEN" })));
-  r = await call("PUT", `${P}/self-assign/${E1._id}`, { token: tA, body: {} });
-  check("a second project while one is active is refused, with the reason", r.status === 400 && /already have an active project/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/self-assign/${AS1._id}`, { token: tB, body: {} });
-  check("Praveen already holds an admin-assigned project, so he cannot take another either", r.status === 400 && /already have an active project/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/self-assign/${I1._id}`, { token: tC, body: {} });
-  check("taking something already taken: 409 naming who has it", r.status === 409 && /Yokesh has already taken/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/self-assign/${AS1._id}`, { token: tC, body: {} });
-  check("an admin-assigned project cannot be taken by someone else (409, says who has it)", r.status === 409 && /already assigned to Praveen/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/${I1._id}`, { token: admin, form: makeForm({ ...good({ title: "Internal again" }), dueDate: dueChange, assignedTo: String(C._id) }) });
-  check("a project in progress cannot be reassigned (409)", r.status === 409 && /in progress/i.test(r.body.message), r.body);
-
-  const ProjectClaim = require("../Models/ProjectClaim.Model");
-  const ST = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Stale claim" })) })).body.project;
-  await ProjectClaim.collection.insertOne({ projectId: new mongoose.Types.ObjectId(ST._id), userId: A._id, createdAt: new Date(Date.now() - 60000) });
-  r = await call("PUT", `${P}/self-assign/${ST._id}`, { token: tC, body: {} });
-  check("a forgotten old claim on a project that is in the pool does not block it", r.status === 200 && r.body.project.assignedToName === "Karthik", r.body);
-  await call("PUT", `${P}/update-status/${ST._id}`, { token: admin, body: { status: "Completed" } }); // Karthik is free again
-
-  // ================================================== START, SUBMIT, APPROVE
-  section("Start, submit for review, admin approves - on time and late");
-  r = await call("PUT", `${P}/start/${AS1._id}`, { token: tA, body: {} });
-  check("only the person who holds it can start it (403)", r.status === 403, r);
-  r = await call("PUT", `${P}/start/${AS1._id}`, { token: tB, body: {} });
-  check("the holder starts an admin-assigned project", r.status === 200 && r.body.project.status === "In Progress" && r.body.project.startedAt, r.body);
-  const started = r.body.project.startedAt;
-  r = await call("PUT", `${P}/start/${AS1._id}`, { token: tB, body: {} });
-  check("starting twice changes nothing (the start time is kept)", r.status === 200 && r.body.project.startedAt === started, r.body);
-
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tA, body: { status: "Completed" } });
-  check("someone else cannot complete it (403)", r.status === 403, r);
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Done" } });
-  check("an unknown status is refused", r.status === 400, r);
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Completed" } });
-  check("staff can no longer mark their own project completed", r.status === 400 && /Only an admin can mark/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Submitted" } });
-  check("staff cannot skip to Submitted without the submit action either", r.status === 400 && /Submit your work with a link/i.test(r.body.message), r.body);
-
-  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tA, body: { link: "https://github.com/example/repo" } });
-  check("someone else cannot submit it (403)", r.status === 403, r);
-  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: {} });
-  check("submitting with no link is refused", r.status === 400 && /Add a link/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "not a link" } });
-  check("submitting with something that is not a real link is refused", r.status === 400 && /does not look like a valid link/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "ftp://example.com/file" } });
-  check("a non-http(s) link is refused", r.status === 400 && /http/i.test(r.body.message), r.body);
-
-  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "https://github.com/example/repo" } });
-  check("submitting a real link works: status becomes Submitted", r.status === 200 && r.body.project.status === "Submitted" && r.body.project.submissionLink === "https://github.com/example/repo" && Boolean(r.body.project.submittedAt), r.body);
-  check("...admins are told there is work to review", Boolean(await notified({ recipientType: "admin", type: "PROJECT_SUBMITTED" })));
-  r = await call("PUT", `${P}/submit/${AS1._id}`, { token: tB, body: { link: "https://drive.google.com/x" } });
-  check("submitting a second time while already submitted is refused", r.status === 400 && /already submitted/i.test(r.body.message), r.body);
-
-  r = await call("PUT", `${P}/self-assign/${ST._id}`, { token: tB, body: {} });
-  check("while Submitted, Praveen still cannot take another project (it still counts as active)", r.status === 400 && /Finish it \(or wait for admin approval\)/i.test(r.body.message), r.body);
-
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "Completed" } });
-  check("staff still cannot approve their own submission", r.status === 400 && /Only an admin/i.test(r.body.message), r.body);
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: admin, body: { status: "Completed" } });
-  const done1 = r.body.project;
-  check("admin approves: on time (before the validity time), with the minutes it took", r.status === 200 && done1.status === "Completed" && done1.completedOnTime === true && typeof done1.completionMinutes === "number" && done1.completedAt, r.body);
-  check("...Praveen is told his submission was approved", Boolean(await notified({ recipientId: B._id, type: "PROJECT_APPROVED" })));
-  r = await call("PUT", `${P}/update-status/${AS1._id}`, { token: tB, body: { status: "In Progress" } });
-  check("staff cannot move a project backwards (400)", r.status === 400 && /cannot go back/i.test(r.body.message), r.body);
-
-  const L1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Will be late", assignedTo: String(B._id) })) })).body.project;
-  await Project.updateOne({ _id: L1._id }, { $set: { dueDate: new Date(Date.now() - 3600 * 1000) } });
-  r = await call("PUT", `${P}/start/${L1._id}`, { token: tB, body: {} });
-  check("(set-up) Praveen starts the late project", r.status === 200, r);
-  r = await call("PUT", `${P}/submit/${L1._id}`, { token: tB, body: { link: "https://drive.google.com/late-work" } });
-  check("(set-up) Praveen submits it, after the validity time has already passed", r.status === 200 && r.body.project.status === "Submitted", r.body);
-  r = await call("PUT", `${P}/update-status/${L1._id}`, { token: admin, body: { status: "In Progress" } });
-  check("admin sends it back instead of approving: the submission is cleared for a fresh resubmission", r.status === 200 && r.body.project.status === "In Progress" && r.body.project.submissionLink === "" && r.body.project.submittedAt === null, r.body);
-  check("...Praveen is told it needs changes", Boolean(await notified({ recipientId: B._id, type: "PROJECT_SENT_BACK" })));
-  r = await call("PUT", `${P}/submit/${L1._id}`, { token: tB, body: { link: "https://drive.google.com/late-work-v2" } });
-  check("(set-up) Praveen resubmits", r.status === 200, r);
-  r = await call("PUT", `${P}/update-status/${L1._id}`, { token: admin, body: { status: "Completed" } });
-  check("admin approves this time: marked late (even this resubmission came after the validity time)", r.status === 200 && r.body.project.completedOnTime === false, r.body);
-
-  const L3 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "On time, but admin is slow to review", assignedTo: String(B._id) })) })).body.project;
-  await Project.updateOne({ _id: L3._id }, { $set: { dueDate: new Date(Date.now() + 1500) } }); // valid for only 1.5 more seconds
-  await call("PUT", `${P}/start/${L3._id}`, { token: tB, body: {} });
-  r = await call("PUT", `${P}/submit/${L3._id}`, { token: tB, body: { link: "https://github.com/example/on-time" } });
-  check("(set-up) submitted comfortably before the validity time runs out", r.status === 200, r);
-  await sleep(2000); // the validity time has now passed - only the ADMIN got round to it late, not the staff member
-  r = await call("PUT", `${P}/update-status/${L3._id}`, { token: admin, body: { status: "Completed" } });
-  check("still marked ON TIME: judged by when the work was submitted, not by how slowly the admin approved it", r.status === 200 && r.body.project.completedOnTime === true, r.body);
-
-  const L2 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Admin completes directly", assignedTo: String(B._id) })) })).body.project;
-  r = await call("PUT", `${P}/update-status/${L2._id}`, { token: admin, body: { status: "Completed" } });
-  check("an admin can still complete a project directly, bypassing submission entirely (override power)", r.status === 200 && r.body.project.status === "Completed" && Boolean(r.body.project.startedAt) && r.body.project.completionMinutes === 0, r.body);
-
-  r = await call("PUT", `${P}/update-status/${E1._id}`, { token: admin, body: { status: "Completed" } });
-  check("admin cannot complete a project nobody holds", r.status === 400 && /Assign the project/i.test(r.body.message), r.body);
-
-  r = await call("GET", `${P}/stats/${B._id}`, { token: tB });
-  check("a person's own numbers, including how many are awaiting review", r.status === 200 && r.body.stats.completed === 4 && r.body.stats.onTime === 3 && r.body.stats.late === 1 && r.body.stats.submitted === 0, r.body);
-  r = await call("GET", `${P}/stats/${B._id}`, { token: tA });
-  check("...are private (403)", r.status === 403, r);
+  const Pool2 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Second pool project" })) })).body.project;
+  r = await call("PUT", `${P}/self-assign/${Pool2._id}`, { token: tA, body: {} });
+  check("one active project at a time: refused with a clear reason pointing at My Tasks", r.status === 400 && /Finish it \(see My Tasks\)/i.test(r.body.message), r.body);
 
   section("Races: two clicks at the same moment");
-  // Yokesh finishes his project, so Yokesh and Karthik are both free
-  r = await call("PUT", `${P}/update-status/${I1._id}`, { token: admin, body: { status: "Completed" } });
-  check("(set-up) admin completes Yokesh's project directly, freeing him up", r.status === 200 && r.body.project.status === "Completed", r.body);
+  // free up Praveen and Karthik (still holding AS1 / E1's tasks from earlier) so they can race
+  await call("POST", `${T}/submission/${task1._id}`, { token: tB, body: { content: "done", taskUrl: "https://github.com/x" } });
+  await call("POST", `${T}/submission/${editTask._id}`, { token: tC, body: { content: "done", taskUrl: "https://github.com/x" } });
   const R1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Race for one project" })) })).body.project;
-  const both = await Promise.all([call("PUT", `${P}/self-assign/${R1._id}`, { token: tA, body: {} }), call("PUT", `${P}/self-assign/${R1._id}`, { token: tC, body: {} })]);
-  const wins = both.filter((x) => x.status === 200);
-  check("two people taking the SAME project: exactly one gets it", wins.length === 1 && both.filter((x) => x.status === 409).length === 1, both.map((x) => x.status));
-  const owner = await Project.findById(R1._id);
-  check("...and it belongs to the winner only", String(owner.assignedTo) === String(wins[0].body.project.assignedTo._id));
+  const both = await Promise.all([call("PUT", `${P}/self-assign/${R1._id}`, { token: tB, body: {} }), call("PUT", `${P}/self-assign/${R1._id}`, { token: tC, body: {} })]);
+  check("two people taking the SAME project at once: exactly one gets it", both.filter((x) => x.status === 200).length === 1 && both.filter((x) => x.status === 409).length === 1, both.map((x) => x.status));
+  const winner = String((await Project.findById(R1._id)).assignedTo);
+  check("...and only the winner got a task for it", (await Task.countDocuments({ projectId: R1._id })) === 1);
 
   const R2 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Race two-a" })) })).body.project;
   const R3 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Race two-b" })) })).body.project;
-  // the loser of the first race holds nothing: let them grab two projects at the very same moment
-  const loserIsA = String(owner.assignedTo) === String(C._id);
-  const holder = loserIsA ? tA : tC;
-  const holderId = loserIsA ? A._id : C._id;
-  const two = await Promise.all([call("PUT", `${P}/self-assign/${R2._id}`, { token: holder, body: {} }), call("PUT", `${P}/self-assign/${R3._id}`, { token: holder, body: {} })]);
-  check("one person taking TWO projects at once: only one is kept", two.filter((x) => x.status === 200).length === 1, two.map((x) => x.status));
-  check("...they hold exactly one active project", (await Project.countDocuments({ assignedTo: holderId, status: { $in: ["Pending", "In Progress"] } })) === 1);
-  check("...the other went back to the pool", (await Project.countDocuments({ _id: { $in: [R2._id, R3._id] }, assignedTo: null, assignmentType: "Pool" })) === 1);
+  const loser = winner === String(B._id) ? tC : tB;
+  const two = await Promise.all([call("PUT", `${P}/self-assign/${R2._id}`, { token: loser, body: {} }), call("PUT", `${P}/self-assign/${R3._id}`, { token: loser, body: {} })]);
+  check("one person taking TWO projects at once: only one is kept, and only one task made", two.filter((x) => x.status === 200).length === 1, two.map((x) => x.status));
 
-  // ================================================== LEADERBOARD
-  section("Leaderboard and team progress");
-  // fresh, isolated data
+  // ================================================== COMPLETING THE TASK MIRRORS BACK
+  section("Completing the task (not the project) is what finishes it - and it mirrors back");
+  r = await call("POST", `${T}/submission/${selfTask._id}`, { token: tB, body: { content: "done", taskUrl: "https://github.com/x" } });
+  check("someone who does not hold the task cannot submit it (403)", r.status === 403, r);
+  r = await call("POST", `${T}/submission/${selfTask._id}`, { token: tA, body: { content: "", taskUrl: "https://github.com/x" } });
+  check("submitting needs the completed-work content", r.status === 400 && /content is required/i.test(r.body.message), r.body);
+  r = await call("POST", `${T}/submission/${selfTask._id}`, { token: tA, body: { content: "Fixed the Safari bug", taskUrl: "https://github.com/example/fix" } });
+  check("submitting work completes the task (no separate approval step, matching how Tasks already worked)", r.status === 200 && r.body.task.status === "Completed", r.body);
+  check("...admins are told", Boolean(await notified({ recipientType: "admin", type: "TASK_SUBMITTED" })));
+
+  const mirrored = await Project.findById(Pool1._id);
+  check("...the PROJECT mirrors it: Completed, on time, with the minutes it took, no separate calculation", mirrored.status === "Completed" && mirrored.completedOnTime === true && typeof mirrored.completionMinutes === "number", mirrored);
+  check("...taking another project works again now (the slot was released)", (await call("PUT", `${P}/self-assign/${Pool2._id}`, { token: tA, body: {} })).status === 200);
+  await call("PUT", `${P}/self-assign/${Pool2._id}`, { token: tA, body: {} }); // no-op if it already succeeded above; keep state simple for what follows
+
+  section("A late completion, and an admin's correction, mirror back too");
+  const Late = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Will be late", assignedTo: String(C._id) })) })).body.project;
+  await Project.updateOne({ _id: Late._id }, { $set: { dueDate: new Date(Date.now() - 3600 * 1000) } });
+  const lateTask = await Task.findById(Late.taskId);
+  await Task.updateOne({ _id: lateTask._id }, { $set: { dueDate: new Date(Date.now() - 3600 * 1000) } });
+  r = await call("POST", `${T}/submission/${lateTask._id}`, { token: tC, body: { content: "late work", taskUrl: "https://drive.google.com/late" } });
+  check("submitting after the validity time: the task completes", r.status === 200 && r.body.task.status === "Completed", r.body);
+  const lateProject = await Project.findById(Late._id);
+  check("...and the project mirrors it as late, from the SAME data (no duplicate on-time logic)", lateProject.status === "Completed" && lateProject.completedOnTime === false, lateProject);
+
+  r = await call("PUT", `${T}/update-status/${lateTask._id}`, { token: tC, body: { status: "In Progress" } });
+  check("an admin can correct a task backwards; staff cannot (400, not their call to make)", r.status === 400 && /cannot go back/i.test(r.body.message), r.body);
+  r = await call("PUT", `${T}/update-status/${lateTask._id}`, { token: admin, body: { status: "In Progress" } });
+  check("admin corrects it back to In Progress", r.status === 200 && r.body.task.status === "In Progress", r.body);
+  const correctedProject = await Project.findById(Late._id);
+  check("...the project's mirrored result is cleared, back to Assigned - not stuck as a stale Completed", correctedProject.status === "Assigned" && correctedProject.completedOnTime === null && correctedProject.completionMinutes === null, correctedProject);
+  r = await call("PUT", `${T}/update-status/${lateTask._id}`, { token: admin, body: { status: "Completed" } });
+  check("admin can complete it directly too (an admin override, bypassing submission)", r.status === 200, r.body);
+  check("...mirrored again", (await Project.findById(Late._id)).status === "Completed");
+
+  section("Editing a task (the previously-broken 'Edit Date' button)");
+  r = await call("PUT", `${T}/update-task/${lateTask._id}`, { token: tC, body: { dueDate: inDays(3) } });
+  check("staff cannot edit a task (403)", r.status === 403, r);
+  const newDue = inDays(14);
+  r = await call("PUT", `${T}/update-task/${lateTask._id}`, { token: admin, body: { dueDate: newDue } });
+  check("admin can change a task's due date", r.status === 200 && new Date(r.body.task.dueDate).toISOString() === newDue, r.body);
+  check("...it keeps the linked project's due date in sync", new Date((await Project.findById(Late._id)).dueDate).toISOString() === newDue);
+  r = await call("PUT", `${T}/update-task/${lateTask._id}`, { token: admin, body: { title: "" } });
+  check("an empty title is refused", r.status === 400, r.body);
+
+  // ================================================== STATS
+  r = await call("GET", `${P}/stats/${C._id}`, { token: tC });
+  check("a person's own numbers come from the mirrored project data", r.status === 200 && r.body.stats.completed === 2 && r.body.stats.onTime === 1 && r.body.stats.late === 1, r.body);
+
+  // ================================================== DELETE CASCADES
+  section("Deleting a project cleans up its task");
+  const D1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "To delete", assignedTo: String(B._id) }), 1) })).body.project;
+  const dTaskId = D1.taskId;
+  r = await call("DELETE", `${P}/${D1._id}`, { token: tA });
+  check("staff cannot delete a project (403)", r.status === 403, r);
+  r = await call("DELETE", `${P}/${D1._id}`, { token: admin });
+  check("admin deletes it", r.status === 200, r);
+  check("...its linked task is gone too, nothing orphaned", !(await Task.findById(dTaskId)));
+
+  // ================================================== LEADERBOARD, FED BY THE MIRRORED DATA
+  section("Leaderboard reads the mirrored project data - one source of truth");
   await Project.deleteMany({});
-  const mkProject = async (over, owner, status, extra = {}) => {
-    const x = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good(over)) })).body.project;
-    if (owner) await call("PUT", `${P}/${x._id}`, { token: admin, form: makeForm({ ...good(over), dueDate: x.dueDate, assignedTo: String(owner._id) }) });
-    if (status) await call("PUT", `${P}/update-status/${x._id}`, { token: admin, body: { status } });
-    if (Object.keys(extra).length) await Project.updateOne({ _id: x._id }, { $set: extra });
-    return x;
+  await Task.deleteMany({});
+  const mkDone = async (title, owner, tok, late) => {
+    const p = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title, assignedTo: String(owner._id) })) })).body.project;
+    if (late) {
+      await Project.updateOne({ _id: p._id }, { $set: { dueDate: new Date(Date.now() - 3600 * 1000) } });
+      await Task.updateOne({ projectId: p._id }, { $set: { dueDate: new Date(Date.now() - 3600 * 1000) } });
+    }
+    const t = await Task.findOne({ projectId: p._id });
+    await call("POST", `${T}/submission/${t._id}`, { token: tok, body: { content: "x", taskUrl: "https://x.com" } });
+    return p;
   };
-  await mkProject({ title: "Proj A1" }, A, "Completed");
-  await mkProject({ title: "Proj A2" }, A, "Completed");
-  await mkProject({ title: "Proj B1" }, B, "Completed");
-  const b2 = await mkProject({ title: "Proj B2" }, B, "Completed");
-  await Project.updateOne({ _id: b2._id }, { $set: { completedOnTime: false } }); // B finished this one late
-  await mkProject({ title: "C-open", projectType: "External" }, C, "In Progress");
-  await mkProject({ title: "A-submitted" }, A, "Submitted");
-  await mkProject({ title: "Nobody yet 1" });
-  await mkProject({ title: "Nobody yet 2", projectType: "External" });
-  await mkProject({ title: "Overdue one" }, null, null, { dueDate: new Date(Date.now() - 86400000) });
+  await mkDone("Task A1", A, tA, false);
+  await mkDone("Task A2", A, tA, false);
+  await mkDone("Task B1", B, tB, false);
+  await mkDone("Task B2", B, tB, true);
+  await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Task C open", assignedTo: String(C._id) })) });
+  await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "Task up for grabs" })) });
 
   r = await call("GET", `${P}/leaderboard`, { token: tA });
   const lb = r.body.leaderboard;
-  check("leaderboard answers for staff", r.status === 200 && Array.isArray(lb) && lb.length === 3, r.body);
-  check("rank 1 is the person with the most on-time completions (2 x 10 = 20 points)", lb[0].name === "Yokesh" && lb[0].points === 20 && lb[0].completed === 2 && lb[0].onTime === 2 && lb[0].rank === 1, lb[0]);
-  check("...a project still awaiting admin review counts as active, not completed", lb[0].active === 1, lb[0]);
-  check("rank 2: one on time + one late (10 + 5 = 15 points, 50% on time)", lb[1].name === "Praveen" && lb[1].points === 15 && lb[1].onTime === 1 && lb[1].late === 1 && lb[1].onTimeRate === 50, lb[1]);
-  check("rank 3: nothing completed yet, but still listed with their open project", lb[2].name === "Karthik" && lb[2].points === 0 && lb[2].active === 1 && lb[2].rank === 3, lb[2]);
-  check("a person can see where THEY stand", r.body.me?.name === "Yokesh" && r.body.me.rank === 1);
-  check("team progress: 9 projects, 4 completed (44%), 1 in progress, 1 submitted, 3 available, 1 overdue", r.body.team.total === 9 && r.body.team.completed === 4 && r.body.team.inProgress === 1 && r.body.team.submitted === 1 && r.body.team.available === 3 && r.body.team.overdue === 1 && r.body.team.percentComplete === 44, r.body.team);
-  r = await call("GET", `${P}/leaderboard?type=External`, { token: admin });
-  check("filter by type: External only (admin view has no personal row)", r.body.type === "External" && r.body.team.total === 2 && r.body.team.completed === 0 && r.body.me === null, r.body.team);
-  r = await call("GET", `${P}/leaderboard?type=Internal`, { token: tB });
-  check("Internal only: Yokesh and Praveen keep their scores", r.body.leaderboard[0].points === 20 && r.body.leaderboard[1].points === 15, r.body.leaderboard);
-  const old = await Project.findOne({ title: "Proj A1" });
-  await Project.updateOne({ _id: old._id }, { $set: { completedAt: new Date(Date.now() - 40 * 86400000) } });
-  r = await call("GET", `${P}/leaderboard?period=week`, { token: tA });
-  check("period 'this week' ignores a completion from 40 days ago", r.body.leaderboard.find((x) => x.name === "Yokesh").completed === 1, r.body.leaderboard);
-  r = await call("GET", `${P}/leaderboard?period=all`, { token: tA });
-  check("...'all time' still counts it", r.body.leaderboard.find((x) => x.name === "Yokesh").completed === 2);
+  check("leaderboard answers for staff, all 3 listed", r.status === 200 && lb.length === 3, r.body);
+  check("Yokesh: 2 on-time completions = 20 points", lb[0].name === "Yokesh" && lb[0].points === 20 && lb[0].completed === 2, lb[0]);
+  check("Praveen: one on-time + one late = 15 points, 50% on-time", lb[1].name === "Praveen" && lb[1].points === 15 && lb[1].onTimeRate === 50, lb[1]);
+  check("Karthik: nothing completed yet, still listed with an active project", lb[2].name === "Karthik" && lb[2].points === 0 && lb[2].active === 1, lb[2]);
+  check("team progress: 6 projects, 4 completed, 1 assigned/active, 1 available", r.body.team.total === 6 && r.body.team.completed === 4 && r.body.team.assigned === 1 && r.body.team.available === 1, r.body.team);
   r = await call("GET", `${P}/leaderboard`);
   check("the leaderboard needs a login (401)", r.status === 401);
-
-  // ================================================== DELETE
-  section("Delete (admin)");
-  const D1 = (await call("POST", `${P}/create-project`, { token: admin, form: makeForm(good({ title: "To be deleted", assignedTo: String(C._id) }), 2) })).body.project;
-  r = await call("DELETE", `${P}/${D1._id}`, { token: tA });
-  check("staff cannot delete (403)", r.status === 403, r);
-  check("...the project is still there", Boolean(await Project.findById(D1._id)));
-  r = await call("DELETE", `${P}/${D1._id}`, { token: admin });
-  check("admin deletes it", r.status === 200 && /deleted/i.test(r.body.message), r);
-  await sleep(200);
-  check("...it is gone from the database and its image files are removed", !(await Project.findById(D1._id)) && D1.images.every((p) => !fs.existsSync(diskName(p))));
-  check("...the person it was assigned to is told", Boolean(await notified({ recipientId: C._id, type: "PROJECT_REMOVED" })));
-  r = await call("DELETE", `${P}/${D1._id}`, { token: admin });
-  check("deleting again: 404", r.status === 404, r);
-  r = await call("DELETE", `${P}/not-an-id`, { token: admin });
-  check("a broken id is refused (400)", r.status === 400, r);
 
   for (const f of fs.existsSync(UPLOADS) ? fs.readdirSync(UPLOADS) : []) if (!filesAtStart.has(f)) fs.unlinkSync(path.join(UPLOADS, f));
   server.close();

@@ -1,7 +1,9 @@
 const express = require("express");
+const anyAuth = require("../Middleware/anyAuth");
 
 const {
   createTask,
+  updateTask,
   getTasksByUser,
   getAllTasks,
   getTaskById,
@@ -11,68 +13,38 @@ const {
   submitTaskWork,
 } = require("../Controllers/Task.controller");
 
-const Taskrouter =
-  express.Router();
+const Taskrouter = express.Router();
 
 // =====================================================
 // ADMIN
 // =====================================================
 
-// Create / assign task
-Taskrouter.post(
-  "/create-task",
-  createTask
-);
-
-// Get all tasks
-Taskrouter.get(
-  "/get-all-tasks",
-  getAllTasks
-);
-
-// Get task by ID
-Taskrouter.get(
-  "/get-task/:taskId",
-  getTaskById
-);
+Taskrouter.post("/create-task", anyAuth.adminOnly, createTask);
+Taskrouter.get("/get-all-tasks", anyAuth.adminOnly, getAllTasks);
+Taskrouter.put("/update-task/:taskId", anyAuth.adminOnly, updateTask);
 
 // =====================================================
-// USER
+// STAFF (and admin)
 // =====================================================
+// IMPORTANT: fixed paths must come before "/:taskId"
 
-// Get tasks assigned to user
-Taskrouter.get(
-  "/user/:userId",
-  getTasksByUser
-);
+Taskrouter.get("/user/:userId", anyAuth, getTasksByUser);
+Taskrouter.get("/get-task/:taskId", anyAuth, getTaskById);
 
-// Update task status
-Taskrouter.put(
-  "/update-status/:taskId",
-  updateTaskStatus
-);
+// the person who holds it moves it forward; an admin can correct any status
+Taskrouter.put("/update-status/:taskId", anyAuth, updateTaskStatus);
 
 // =====================================================
 // SUBMISSION
 // =====================================================
 
-Taskrouter.post(
-  "/submission/:taskId",
-  submitTaskWork
-);
+Taskrouter.post("/submission/:taskId", anyAuth.userOnly, submitTaskWork);
 
 // =====================================================
 // COMMENTS
 // =====================================================
 
-Taskrouter.post(
-  "/comment/:taskId",
-  addTaskComment
-);
-
-Taskrouter.delete(
-  "/comment/:taskId/:commentId",
-  deleteTaskComment
-);
+Taskrouter.post("/comment/:taskId", anyAuth, addTaskComment);
+Taskrouter.delete("/comment/:taskId/:commentId", anyAuth, deleteTaskComment);
 
 module.exports = Taskrouter;

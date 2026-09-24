@@ -75,6 +75,7 @@ import NotificationCenter from "./wifi/NotificationCenter";
 import AdminDailyReports from "./wifi/AdminDailyReports";
 import OvertimePanel from "./wifi/OvertimePanel";
 import ProjectLeaderboard from "./projects/ProjectLeaderboard";
+import ProjectFormModal from "./projects/ProjectFormModal";
 import SidebarScroll from "./SidebarScroll";
 import { API_ORIGIN } from "../lib/api";
 import {
@@ -796,6 +797,10 @@ export default function AdminDashboard() {
     showAssignTaskModal,
     setShowAssignTaskModal,
   ] = useState(false);
+
+  // Assigning a task now opens the same rich Project form used on the Projects screen -
+  // one path for both. null = closed; "" or a staff id = open, optionally pre-selecting them.
+  const [taskFormPreset, setTaskFormPreset] = useState(null);
 
   const [
     showSubmissionModal,
@@ -1886,22 +1891,8 @@ export default function AdminDashboard() {
 
   const openAssignTaskModal =
     (user = null) => {
-      setTaskTitle("");
-      setTaskDescription(
-        ""
-      );
-      setTaskDueDate("");
-
-      if (user?._id) {
-        setTaskAssignees([
-          user._id,
-        ]);
-      } else {
-        setTaskAssignees([]);
-      }
-
-      setShowAssignTaskModal(
-        true
+      setTaskFormPreset(
+        user?._id || ""
       );
     };
 
@@ -8162,6 +8153,24 @@ export default function AdminDashboard() {
       {/* =================================================
           ASSIGN TASK MODAL
       ================================================= */}
+
+      {/* Assigning a task now opens the same Internal / External project form used on the
+          Projects screen - one form, one path, whether it becomes a pool project or is
+          handed straight to someone. Self-assigning or being assigned always lands in Tasks. */}
+      {taskFormPreset !== null && (
+        <ProjectFormModal
+          mode="create"
+          defaultType="Internal"
+          defaultAssignedTo={taskFormPreset}
+          users={userList}
+          onClose={() => setTaskFormPreset(null)}
+          onSaved={(project, message) => {
+            setTaskFormPreset(null);
+            alert(message || "Successfully added to tasks.");
+            fetchTasks();
+          }}
+        />
+      )}
 
       {showAssignTaskModal && (
         <Modal

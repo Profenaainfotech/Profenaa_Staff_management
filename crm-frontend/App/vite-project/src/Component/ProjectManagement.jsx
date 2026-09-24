@@ -220,7 +220,7 @@ const isSameDay = (date1, date2) => {
 const isOverdue = (project) => {
   if (!project?.dueDate) return false;
 
-  if (getProjectStatus(project) === "Completed" || getProjectStatus(project) === "Submitted") {
+  if (getProjectStatus(project) === "Completed") {
     return false;
   }
 
@@ -283,11 +283,7 @@ const isDueThisWeek = (project) => {
 const isDueSoon = (project) => {
   if (!project?.dueDate) return false;
 
-  if (
-    getProjectStatus(project) ===
-      "Completed" ||
-    getProjectStatus(project) === "Submitted"
-  ) {
+  if (getProjectStatus(project) === "Completed") {
     return false;
   }
 
@@ -327,11 +323,8 @@ const getStatusClasses = (status) => {
     case "Completed":
       return "bg-emerald-100 text-emerald-700 border-emerald-200";
 
-    case "Submitted":
+    case "Assigned":
       return "bg-indigo-100 text-indigo-700 border-indigo-200";
-
-    case "In Progress":
-      return "bg-blue-100 text-blue-700 border-blue-200";
 
     case "Pending":
     default:
@@ -344,11 +337,8 @@ const getStatusIcon = (status) => {
     case "Completed":
       return <CheckCircle2 size={14} />;
 
-    case "Submitted":
+    case "Assigned":
       return <Send size={14} />;
-
-    case "In Progress":
-      return <PlayCircle size={14} />;
 
     default:
       return <Circle size={14} />;
@@ -360,10 +350,7 @@ const getProgress = (project) => {
     case "Completed":
       return 100;
 
-    case "Submitted":
-      return 80;
-
-    case "In Progress":
+    case "Assigned":
       return 50;
 
     case "Pending":
@@ -377,11 +364,8 @@ const getProgressClasses = (project) => {
     case "Completed":
       return "bg-emerald-500";
 
-    case "Submitted":
+    case "Assigned":
       return "bg-indigo-500";
-
-    case "In Progress":
-      return "bg-blue-500";
 
     default:
       return "bg-amber-500";
@@ -412,9 +396,6 @@ export default function ProjectManagement() {
   const [deleting, setDeleting] = useState(false);
   const errorTimer = useRef(null);
   const successTimer = useRef(null);
-
-  const [updatingStatus, setUpdatingStatus] =
-    useState("");
 
   const [showDetailsModal, setShowDetailsModal] =
     useState(false);
@@ -639,84 +620,6 @@ export default function ProjectManagement() {
   /* =======================================================
      UPDATE PROJECT STATUS
   ======================================================= */
-
-  const updateProjectStatus = async (
-    projectId,
-    newStatus
-  ) => {
-    if (!projectId) return;
-
-    try {
-      setUpdatingStatus(projectId);
-
-      const response =
-        await fetch(
-          `${PROJECT_API_URL}/update-status/${projectId}`,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              ...adminHeaders(),
-            },
-            body: JSON.stringify({
-              status: newStatus,
-            }),
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            data?.error ||
-            "Failed to update project status."
-        );
-      }
-
-      setProjects((prev) =>
-        prev.map((project) =>
-          getProjectId(project) ===
-          projectId
-            ? {
-                ...project,
-                status: newStatus,
-              }
-            : project
-        )
-      );
-
-      if (
-        selectedProject &&
-        getProjectId(selectedProject) ===
-          projectId
-      ) {
-        setSelectedProject(
-          (prev) => ({
-            ...prev,
-            status: newStatus,
-          })
-        );
-      }
-
-      showSuccess(
-        `Project status changed to ${newStatus}.`
-      );
-    } catch (error) {
-      console.error(
-        "UPDATE STATUS ERROR:",
-        error
-      );
-
-      showError(
-        error.message ||
-          "Unable to update project status."
-      );
-    } finally {
-      setUpdatingStatus("");
-    }
-  };
 
   /* =======================================================
      FILTER RESET
@@ -1008,12 +911,12 @@ export default function ProjectManagement() {
           ) === "Pending"
       ).length;
 
-    const inProgress =
+    const active =
       projectsOfType.filter(
         (project) =>
           getProjectStatus(
             project
-          ) === "In Progress"
+          ) === "Assigned"
       ).length;
 
     const completed =
@@ -1069,7 +972,7 @@ export default function ProjectManagement() {
     return {
       total,
       pending,
-      inProgress,
+      active,
       completed,
       pool,
       assigned,
@@ -1153,87 +1056,19 @@ export default function ProjectManagement() {
   };
 
   /* =======================================================
-     PROJECT STATUS QUICK ACTION
+     PROJECT STATUS  (read only - once assigned, the linked task
+     is what gets worked on; see it and manage it from Tasks)
   ======================================================= */
 
-  const handleQuickStatusChange = (
-    project,
-    event
-  ) => {
-    const newStatus =
-      event.target.value;
-
-    updateProjectStatus(
-      getProjectId(project),
-      newStatus
-    );
-  };
-
-  /* =======================================================
-     RENDER STATUS DROPDOWN
-  ======================================================= */
-
-  const renderStatusDropdown = (
-    project
-  ) => {
-    const projectId =
-      getProjectId(project);
-
+  const renderStatusBadge = (project) => {
+    const status = getProjectStatus(project);
     return (
-      <div className="relative">
-        <select
-          value={getProjectStatus(
-            project
-          )}
-          onChange={(event) =>
-            handleQuickStatusChange(
-              project,
-              event
-            )
-          }
-          disabled={
-            updatingStatus ===
-            projectId
-          }
-          className="appearance-none pl-3 pr-8 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-        >
-          <option value="Pending">
-            Pending
-          </option>
-
-          <option value="In Progress">
-            In Progress
-          </option>
-
-          <option value="Submitted">
-            Submitted (awaiting review)
-          </option>
-
-          <option value="Completed">
-            Completed
-          </option>
-        </select>
-
-        <ChevronDown
-          size={13}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-        />
-      </div>
-    );
-  };
-
-  const renderSubmissionLink = (project, className = "") => {
-    if (!project?.submissionLink) return null;
-    return (
-      <a
-        href={project.submissionLink}
-        target="_blank"
-        rel="noreferrer"
-        title="Open the staff member's submitted link to check their work"
-        className={`inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 ${className}`}
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-black ${getStatusClasses(status)}`}
       >
-        <ExternalLink size={12} /> Open submission
-      </a>
+        {getStatusIcon(status)}
+        {status}
+      </span>
     );
   };
 
@@ -1437,12 +1272,12 @@ export default function ProjectManagement() {
             </div>
 
             <span className="text-2xl font-black text-slate-800">
-              {stats.inProgress}
+              {stats.active}
             </span>
           </div>
 
           <p className="text-xs font-bold text-slate-500 mt-3">
-            In Progress
+            Active (as tasks)
           </p>
         </div>
 
@@ -1725,8 +1560,8 @@ export default function ProjectManagement() {
                 Pending
               </option>
 
-              <option value="In Progress">
-                In Progress
+              <option value="Assigned">
+                Assigned
               </option>
 
               <option value="Completed">
@@ -2294,10 +2129,7 @@ export default function ProjectManagement() {
                         {/* Status */}
 
                         <td className="px-5 py-4">
-                          {renderStatusDropdown(
-                            project
-                          )}
-                          {renderSubmissionLink(project, "mt-2")}
+                          {renderStatusBadge(project)}
                         </td>
 
                         {/* Due */}
@@ -3065,27 +2897,7 @@ export default function ProjectManagement() {
                   </div>
                 )}
 
-                {/* Submission for review */}
-
-                {selectedProject?.submissionLink && (
-                  <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="flex items-center gap-2 text-sm font-black text-indigo-800">
-                          <Send size={15} />
-                          {selectedProject.status === "Submitted" ? "Submitted for review" : "Submission"}
-                        </h3>
-                        <p className="mt-1 text-xs text-indigo-600">
-                          {selectedProject.submittedAt ? `Sent in ${formatDateTime(selectedProject.submittedAt)}. ` : ""}
-                          Open the link to check the staff member's work before marking it Completed.
-                        </p>
-                      </div>
-                      {renderSubmissionLink(selectedProject)}
-                    </div>
-                  </div>
-                )}
-
-                {/* Status action */}
+                {/* Status */}
 
                 <div className="mt-5 rounded-2xl border border-slate-200 p-4">
 
@@ -3094,19 +2906,18 @@ export default function ProjectManagement() {
                     <div>
 
                       <h3 className="text-sm font-black text-slate-700">
-                        Update Project Status
+                        Status
                       </h3>
 
                       <p className="text-xs text-slate-400 mt-1">
-                        Change the current project
-                        progress.
+                        {selectedProject?.status === "Pending"
+                          ? "Not assigned yet - anyone can take it from the pool, or you can assign it above."
+                          : "Assigned work is tracked as a task from here on - start it, review it and mark it Completed from the Tasks screen."}
                       </p>
 
                     </div>
 
-                    {renderStatusDropdown(
-                      selectedProject
-                    )}
+                    {renderStatusBadge(selectedProject)}
 
                   </div>
 
