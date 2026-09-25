@@ -1,236 +1,268 @@
-// Wi-Fi attendance: employee "my day" + admin live board, reports, audit log, manual edits
-const AttendanceEvent = require("../Models/AttendanceEvent.Model");
 const Attendance = require("../Models/Attendance.Model");
 const User = require("../Models/User.Model");
-const LoginLog = require("../Models/LoginLog.Model");
-const report = require("../Services/report.service");
-const engine = require("../Services/attendanceEngine");
-const { dateAtTime, dateKey, isValidDateKey, monthRange, addDays } = require("../Utils/time");
-const { ok, handle, httpError, isObjectId } = require("../Utils/http");
 
-// ---------------- employee ----------------
-const myLive = handle(async (req, res) => {
-  ok(res, await report.userLive(req.payload.id));
-});
+// Wi-Fi attendance is recorded automatically by the office agent, so the manual
+// check-in / check-out endpoints are not available to those employees.
+const wifiTracked = async (userId) => {
+  const u = await User.findById(userId).select("attendanceMode");
+  return u?.attendanceMode === "WIFI";
+};
+const WIFI_MESSAGE =
+  "Your attendance is recorded automatically from the office Wi-Fi. Manual check-in/out is not needed.";
 
-// GET /api/attendance/my/month?month=2026-09
-const myMonth = handle(async (req, res) => {
-  const month = req.query.month || dateKey().slice(0, 7);
-  const data = await report.monthlyReport({ month, userId: req.payload.id });
-  ok(res, { month: data.month, from: data.from, to: data.to, summary: { ...data.rows[0], days: undefined }, days: data.rows[0]?.days || [] });
-});
+// Get today's date in Indian Standard Time
+const getISTDate = () => {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+};
 
-// GET /api/attendance/my/events?limit=30
-const myEvents = handle(async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 30, 100);
-  const events = await AttendanceEvent.find({ userId: req.payload.id, type: { $ne: "REJECTED_NETWORK" } })
-    .sort({ occurredAt: -1 })
-    .limit(limit)
-    .lean();
-  ok(res, { events });
-});
+// ===============================
+// USER - GET TODAY ATTENDANCE
+// ===============================
+const getMyTodayAttendance = async (req, res) => {
+  try {
+    const userId = req.payload.id;
 
-// ---------------- admin ----------------
-// GET /api/attendance/admin/board?date=&branchId=&q=&mode=
-const adminBoard = handle(async (req, res) => {
-  const { date, branchId, q, mode } = req.query;
-  if (date && !isValidDateKey(date)) throw httpError(400, "date must be YYYY-MM-DD");
-  if (branchId && !isObjectId(branchId)) throw httpError(400, "Invalid branchId");
-  ok(res, await report.dailyBoard({ date, branchId, q, mode }));
-});
+    const today = getISTDate();
 
-// GET /api/attendance/admin/report?month=2026-09&branchId=
-const adminReport = handle(async (req, res) => {
-  const { month, branchId } = req.query;
-  if (branchId && !isObjectId(branchId)) throw httpError(400, "Invalid branchId");
-  ok(res, await report.monthlyReport({ month, branchId }));
-});
+    const attendance = await Attendance.findOne({
+      userId,
+      date: today,
+    });
 
-// GET /api/attendance/admin/user/:userId?month=  (one employee's calendar)
-const adminUserMonth = handle(async (req, res) => {
-  if (!isObjectId(req.params.userId)) throw httpError(400, "Invalid user id");
-  const data = await report.monthlyReport({ month: req.query.month, userId: req.params.userId });
-  ok(res, { month: data.month, summary: { ...data.rows[0], days: undefined }, days: data.rows[0]?.days || [] });
-});
+    return res.status(200).json({
+      success: true,
+      attendance: attendance || null,
+    });
+  } catch (error) {
+    console.error("Get today's attendance error:", error);
 
-// GET /api/attendance/admin/events?userId=&date=&type=&limit=
-const adminEvents = handle(async (req, res) => {
-  const q = {};
-  if (isObjectId(req.query.userId)) q.userId = req.query.userId;
-  if (req.query.date) {
-    if (!isValidDateKey(req.query.date)) throw httpError(400, "date must be YYYY-MM-DD");
-    q.date = req.query.date;
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get today's attendance",
+      error: error.message,
+    });
   }
-  if (req.query.type) q.type = String(req.query.type).toUpperCase();
-  const limit = Math.min(Number(req.query.limit) || 100, 500);
-  const events = await AttendanceEvent.find(q).sort({ occurredAt: -1 }).limit(limit).populate("branchId", "name").lean();
-  ok(res, { events });
-});
+};
 
-// GET /api/attendance/admin/detail?userId=&date=
-const adminDetail = handle(async (req, res) => {
-  const { userId, date } = req.query;
-  if (!isObjectId(userId) || !isValidDateKey(date)) throw httpError(400, "userId and date (YYYY-MM-DD) are required");
-  const attendance = await Attendance.findOne({ userId, date }).lean();
-  const events = await AttendanceEvent.find({ userId, date, type: { $ne: "REJECTED_NETWORK" } }).sort({ occurredAt: 1 }).lean();
-  const logins = await LoginLog.find({ userId, date }).sort({ at: 1 }).lean();
-  ok(res, { attendance, events, logins });
-});
+// ===============================
+// USER - CHECK IN
+// ===============================
+const checkIn = async (req, res) => {
+  try {
+    const userId = req.payload.id;
 
-// PUT /api/attendance/admin/manual  { userId, date, checkIn:"HH:MM", checkOut:"HH:MM", note }
-const adminManual = handle(async (req, res) => {
-  const { userId, date, checkIn, checkOut, note } = req.body || {};
-  if (!isObjectId(userId)) throw httpError(400, "Invalid userId");
-  if (!isValidDateKey(date)) throw httpError(400, "date must be YYYY-MM-DD");
-  if (date > dateKey()) throw httpError(400, "Cannot record attendance for a future date");
-  if (!/^\d{2}:\d{2}$/.test(String(checkIn)) || !/^\d{2}:\d{2}$/.test(String(checkOut))) {
-    throw httpError(400, "checkIn and checkOut must be HH:MM");
+    if (await wifiTracked(userId)) {
+      return res.status(403).json({ success: false, message: WIFI_MESSAGE });
+    }
+    const userName = req.payload.name || req.payload.email;
+
+    const today = getISTDate();
+
+    const existingAttendance = await Attendance.findOne({
+      userId,
+      date: today,
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        success: false,
+        message: "Attendance already marked for today",
+        attendance: existingAttendance,
+      });
+    }
+
+    const attendance = await Attendance.create({
+      userId,
+      userName,
+      date: today,
+      checkIn: new Date(),
+      status: "Present",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Check-in successful",
+      attendance,
+    });
+  } catch (error) {
+    console.error("Check-in error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to check in",
+      error: error.message,
+    });
   }
-  if (!note || !String(note).trim()) throw httpError(400, "A reason is required for manual changes");
+};
 
-  const att = await engine.applyManualTimes({
-    userId,
-    date,
-    checkIn: dateAtTime(date, checkIn),
-    checkOut: dateAtTime(date, checkOut),
-    by: req.admin.name,
-    note: String(note).trim(),
-  });
-  ok(res, { attendance: att });
-});
+// ===============================
+// USER - CHECK OUT
+// ===============================
+const checkOut = async (req, res) => {
+  try {
+    const userId = req.payload.id;
 
-// ---------------- shift-end question, explanations, sign-ins (employee) ----------------
-// POST /api/attendance/my/overtime   { answer: "YES" | "NO" }
-const myOvertimeAnswer = handle(async (req, res) => {
-  const r = await engine.answerOvertime(req.payload.id, req.body?.answer, "WEB");
-  if (!r.ok) {
-    const msg =
-      r.code === "EXPIRED"
-        ? "The time to answer has passed."
-        : "There is no shift-end question waiting for an answer.";
-    throw httpError(409, msg);
+    if (await wifiTracked(userId)) {
+      return res.status(403).json({ success: false, message: WIFI_MESSAGE });
+    }
+
+    const today = getISTDate();
+
+    const attendance = await Attendance.findOne({
+      userId,
+      date: today,
+    });
+
+    if (!attendance) {
+      return res.status(404).json({
+        success: false,
+        message: "No check-in found for today",
+      });
+    }
+
+    if (!attendance.checkIn) {
+      return res.status(400).json({
+        success: false,
+        message: "Please check in first",
+      });
+    }
+
+    if (attendance.checkOut) {
+      return res.status(400).json({
+        success: false,
+        message: "Already checked out",
+        attendance,
+      });
+    }
+
+    const checkOutTime = new Date();
+
+    const difference =
+      checkOutTime.getTime() -
+      new Date(attendance.checkIn).getTime();
+
+    const totalMinutes = Math.max(
+      0,
+      Math.floor(difference / (1000 * 60))
+    );
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    attendance.checkOut = checkOutTime;
+    attendance.totalMinutes = totalMinutes;
+    attendance.totalHours = `${hours}h ${minutes}m`;
+    attendance.status = "Completed";
+
+    await attendance.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Check-out successful",
+      attendance,
+    });
+  } catch (error) {
+    console.error("Check-out error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to check out",
+      error: error.message,
+    });
   }
-  ok(res, r);
-});
+};
 
-// POST /api/attendance/my/offday   { answer: "YES" | "NO" }   -  "are you working today?" (a day off)
-const myOffDayAnswer = handle(async (req, res) => {
-  const r = await engine.answerOffDay(req.payload.id, req.body?.answer, "WEB");
-  if (!r.ok) {
-    const msg =
-      r.code === "EXPIRED"
-        ? "The time to answer has passed."
-        : "There is no \"are you working today?\" question waiting for an answer.";
-    throw httpError(409, msg);
+// ===============================
+// USER - ATTENDANCE HISTORY
+// ===============================
+const getMyAttendanceHistory = async (req, res) => {
+  try {
+    const userId = req.payload.id;
+
+    const attendance = await Attendance.find({
+      userId,
+    }).sort({
+      date: -1,
+    });
+
+    return res.status(200).json({
+      success: true,
+      attendance,
+    });
+  } catch (error) {
+    console.error("Attendance history error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get attendance history",
+      error: error.message,
+    });
   }
-  ok(res, r);
-});
+};
 
-// POST /api/attendance/my/explain   { date, text }
-const myExplain = handle(async (req, res) => {
-  const { date, text } = req.body || {};
-  if (!isValidDateKey(date)) throw httpError(400, "date must be YYYY-MM-DD");
-  const att = await engine.explainReview(req.payload.id, date, text);
-  ok(res, { message: "Your explanation was sent to the administrator", review: att.review });
-});
+// ===============================
+// ADMIN - GET ALL ATTENDANCE
+// ===============================
+const getAllAttendance = async (req, res) => {
+  try {
+    const attendance = await Attendance.find().sort({
+      date: -1,
+      checkIn: -1,
+    });
 
-// GET /api/attendance/my/reviews   days waiting for (or recently given) an explanation, last 14 days
-const myReviews = handle(async (req, res) => {
-  const from = addDays(dateKey(), -14);
-  const docs = await Attendance.find({ userId: req.payload.id, date: { $gte: from }, "review.state": { $in: ["PENDING_EXPLANATION", "EXPLAINED", "APPROVED", "REJECTED"] } })
-    .sort({ date: -1 })
-    .lean();
-  ok(res, {
-    reviews: docs.map((d) => ({ date: d.date, totalMinutes: d.totalMinutes, checkOut: d.checkOut, review: d.review })),
-  });
-});
+    return res.status(200).json({
+      success: true,
+      attendance,
+    });
+  } catch (error) {
+    console.error("Get all attendance error:", error);
 
-// GET /api/attendance/my/logins?limit=15
-const myLogins = handle(async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 15, 50);
-  const logins = await LoginLog.find({ userId: req.payload.id, role: "user" }).sort({ at: -1 }).limit(limit).lean();
-  ok(res, { logins });
-});
-
-// ---------------- admin: shift-end reviews, sign-in activity, overtime & Sunday work ----------------
-// GET /api/attendance/admin/reviews?status=open|all
-const adminReviews = handle(async (req, res) => {
-  const states = req.query.status === "all" ? ["PENDING_EXPLANATION", "EXPLAINED", "APPROVED", "REJECTED"] : ["PENDING_EXPLANATION", "EXPLAINED"];
-  const docs = await Attendance.find({ "review.state": { $in: states } }).sort({ date: -1 }).limit(200).lean();
-  ok(res, {
-    reviews: docs.map((d) => ({
-      attendanceId: d._id,
-      userId: d.userId,
-      userName: d.userName,
-      date: d.date,
-      totalMinutes: d.totalMinutes,
-      checkIn: d.checkIn,
-      checkOut: d.checkOut,
-      review: d.review,
-    })),
-  });
-});
-
-// PATCH /api/attendance/admin/review   { userId, date, decision: "APPROVE"|"REJECT", note }
-const adminDecideReview = handle(async (req, res) => {
-  const { userId, date, decision, note } = req.body || {};
-  if (!isObjectId(userId)) throw httpError(400, "Invalid userId");
-  if (!isValidDateKey(date)) throw httpError(400, "date must be YYYY-MM-DD");
-  const att = await engine.decideReview({ userId, date, decision, note, by: req.admin.name });
-  ok(res, { message: decision === "APPROVE" ? "Marked Present" : "Kept as a half day", attendance: att });
-});
-
-// GET /api/attendance/admin/logins?date=&from=&to=&userId=&result=&role=&limit=
-const adminLogins = handle(async (req, res) => {
-  const { date, from, to, userId, result, role, q } = req.query;
-  const query = {};
-  if (date) {
-    if (!isValidDateKey(date)) throw httpError(400, "date must be YYYY-MM-DD");
-    query.date = date;
-  } else if (from || to) {
-    query.date = {};
-    if (from) query.date.$gte = from;
-    if (to) query.date.$lte = to;
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get attendance",
+      error: error.message,
+    });
   }
-  if (isObjectId(userId)) query.userId = userId;
-  if (["ALLOWED", "BLOCKED"].includes(result)) query.result = result;
-  if (["user", "admin"].includes(role)) query.role = role;
-  if (q) query.userName = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-  const limit = Math.min(Number(req.query.limit) || 200, 500);
-  const logins = await LoginLog.find(query).sort({ at: -1 }).limit(limit).lean();
-  ok(res, { logins });
-});
+};
 
-// GET /api/attendance/admin/extra?from=&to=&branchId=   (overtime + Sunday / holiday work)
-const adminExtra = handle(async (req, res) => {
-  const { from, to, branchId } = req.query;
-  if (from && !isValidDateKey(from)) throw httpError(400, "from must be YYYY-MM-DD");
-  if (to && !isValidDateKey(to)) throw httpError(400, "to must be YYYY-MM-DD");
-  if (branchId && !isObjectId(branchId)) throw httpError(400, "Invalid branchId");
-  ok(res, await report.extraWork({ from, to, branchId }));
-});
+// ===============================
+// ADMIN - GET ATTENDANCE BY DATE
+// ===============================
+const getAttendanceByDate = async (req, res) => {
+  try {
+    const { date } = req.params;
 
-const exists = async (id) => Boolean(await User.exists({ _id: id }));
+    const attendance = await Attendance.find({
+      date,
+    }).sort({
+      checkIn: -1,
+    });
+
+    return res.status(200).json({
+      success: true,
+      attendance,
+    });
+  } catch (error) {
+    console.error("Get attendance by date error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get attendance",
+      error: error.message,
+    });
+  }
+};
 
 module.exports = {
-  myLive,
-  myMonth,
-  myEvents,
-  myOvertimeAnswer,
-  myOffDayAnswer,
-  myExplain,
-  myLogins,
-  myReviews,
-  adminBoard,
-  adminReport,
-  adminUserMonth,
-  adminEvents,
-  adminDetail,
-  adminManual,
-  adminReviews,
-  adminDecideReview,
-  adminLogins,
-  adminExtra,
-  exists,
-  monthRange,
+  getMyTodayAttendance,
+  checkIn,
+  checkOut,
+  getMyAttendanceHistory,
+  getAllAttendance,
+  getAttendanceByDate,
 };
