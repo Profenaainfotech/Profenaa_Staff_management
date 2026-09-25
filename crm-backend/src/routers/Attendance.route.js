@@ -39,6 +39,7 @@ attendancerouter.get("/my/live", requireAuth, center.myLive);
 attendancerouter.get("/my/month", requireAuth, center.myMonth);
 attendancerouter.get("/my/events", requireAuth, center.myEvents);
 attendancerouter.post("/my/overtime", requireAuth, center.myOvertimeAnswer);
+attendancerouter.post("/my/offday", requireAuth, center.myOffDayAnswer);
 attendancerouter.post("/my/explain", requireAuth, center.myExplain);
 attendancerouter.get("/my/logins", requireAuth, center.myLogins);
 attendancerouter.get("/my/reviews", requireAuth, center.myReviews);

@@ -12,6 +12,12 @@ const jwt = require("jsonwebtoken");
 
 const JWT_SECRET = process.env.JWT_SECRET || "mysecretkey";
 
+// A second login is only blocked (as "already signed in elsewhere") while the OTHER
+// session has pinged recently - the staff dashboard does this every minute while it is
+// genuinely open (see updateLastActive). Anything staler than this is treated as an
+// abandoned tab / a crash, and a fresh login is allowed to take over normally.
+const ACTIVE_SESSION_WINDOW_MS = 3 * 60 * 1000;
+
 // =====================================================
 // IST DATE HELPER
 // =====================================================
@@ -347,6 +353,23 @@ const LoginUser = async (req, res) => {
         success: false,
         code: "OFFICE_WIFI_REQUIRED",
         message: gate.message,
+      });
+    }
+
+    // =================================================
+    // ALREADY SIGNED IN ELSEWHERE?
+    //
+    // Logging in again in a new tab used to silently start a second session, resetting
+    // the attendance timer back to 0. Now it is blocked outright - UNLESS the other
+    // session has clearly gone stale (no activity ping recently), in which case it is
+    // treated as an abandoned/crashed tab and a fresh login is allowed through.
+    // =================================================
+
+    if (user.isOnline === true && user.lastActivity && Date.now() - new Date(user.lastActivity).getTime() < ACTIVE_SESSION_WINDOW_MS) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_SIGNED_IN",
+        message: "This account is already signed in on another tab or device. Log out there first, or wait a few minutes if that session has been closed.",
       });
     }
 

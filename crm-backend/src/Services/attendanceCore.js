@@ -46,6 +46,7 @@ const END_REASON_LABELS = {
   CRM_LOGOUT_UNVERIFIED: "Logged out (office Wi-Fi not confirmed)",
   OVERTIME_DECLINED: "Finished at shift end",
   NO_RESPONSE: "No reply to the shift-end question",
+  OFFDAY_DECLINED: "Not working today (a day off)",
 };
 
 const ms = (d) => (d ? new Date(d).getTime() : 0);
@@ -87,6 +88,7 @@ const openSession = (att) => {
 // ----------------------------------------------------
 function ensureExtras(att) {
   if (!att.overtime) att.overtime = { state: "NONE", askId: 0 };
+  if (!att.offDayAsk) att.offDayAsk = { state: "NONE", askId: 0 };
   if (!att.crm) att.crm = {};
   if (!att.review) att.review = { state: "NONE" };
   return att;
@@ -103,10 +105,30 @@ function shiftEndAt(att, ctx) {
 }
 
 /** The shift-end auto-close does not apply while overtime is being asked about / confirmed */
+/**
+ * Absolute last resort: no session should ever run forever, no matter what state the
+ * "still working?" question is in - a stuck monitor sweep, a bug, anything. Measured
+ * from check-in (not shift end), so it works even on a day off, where the ordinary
+ * shift-based cap does not apply at all.
+ */
+function absoluteCapAt(session, ctx) {
+  const hours = Number(ctx.settings?.absoluteMaxSessionHours) || 16;
+  return ms(session.checkIn) + hours * 3600 * 1000;
+}
+
 function capFor(att, ctx) {
+  const s = openSession(att);
+  const absolute = s ? absoluteCapAt(s, ctx) : null;
   const st = att.overtime?.state;
-  if (st === "CONFIRMED" || st === "ASKING") return null;
-  return capAt(att.date, ctx);
+  // the ordinary shift-end cap is exempted while the question is live or answered YES -
+  // that is by design (genuine overtime should keep running) - but the absolute backstop
+  // above is never exempted, so a stuck "ASKING"/"CONFIRMED" state can no longer mean an
+  // unbounded session.
+  if (st === "CONFIRMED" || st === "ASKING") return absolute;
+  const ordinary = capAt(att.date, ctx);
+  if (ordinary === null) return absolute;
+  if (absolute === null) return ordinary;
+  return Math.min(ordinary, absolute);
 }
 
 const DONE_STATES = ["DECLINED", "NO_RESPONSE"];
@@ -296,6 +318,13 @@ function applySignal(att, ctx, sig) {
     return out;
   }
 
+  // Said "No" (or did not answer) to "are you working today?" on a day off: no automatic
+  // restart afterwards either - same idea, just for the day-off question.
+  if (ctx.offDay && att.offDayAsk?.state === "NO") {
+    out.blocked = "OFFDAY_DECLINED";
+    return out;
+  }
+
   const list = att.sessions;
   const last = list[list.length - 1];
 
@@ -328,6 +357,7 @@ function applySignal(att, ctx, sig) {
     ev(first ? "CHECK_IN" : "RETURN", sig, first ? "Checked in on office Wi-Fi" : "Back on office Wi-Fi")
   );
   out.notes.push({ type: first ? "FIRST_CHECK_IN" : "RETURNED" });
+  if (ctx.offDay) askOffDay(att, ctx, t, out); // idempotent: only actually asks once per day
   if (sig.live) maybeAskOvertime(att, ctx, t, out);
   return out;
 }
@@ -375,6 +405,7 @@ function applyMonitorTick(att, ctx, now) {
   }
 
   resolveOvertimeDeadline(att, ctx, n, out);
+  resolveOffDayDeadline(att, ctx, n, out);
   if (openSession(att)) maybeAskOvertime(att, ctx, n, out);
   return out;
 }
@@ -510,8 +541,77 @@ function answerOvertime(att, ctx, answer, nowMs) {
 }
 
 // ----------------------------------------------------
-// CRM LOGOUT / LOGIN  (Wi-Fi staff)
-//   verified   = the PC was confirmed on the office Wi-Fi right now -> the session
+// "ARE YOU WORKING TODAY?"  (Sunday / a holiday)
+//
+// A day off is normally leave: nothing is counted unless the person confirms they are
+// actually working. Asked once, right at the very first check-in of the day (not at
+// shift end - the question here is "are you working AT ALL today", not "still working
+// past your shift"). While the question is unanswered, the session tracks normally (so
+// no time is lost if they say yes) - but recompute() only credits offDayMinutes once the
+// answer is YES; a NO, or no reply within the window, zeroes it out for the day and ends
+// the session, and the question is not asked again for the rest of that day.
+// ----------------------------------------------------
+function askOffDay(att, ctx, nowMs, out) {
+  ensureExtras(att);
+  const o = att.offDayAsk;
+  if (o.state !== "NONE") return; // already asked (or answered) today
+  const windowMs = (Number(ctx.settings?.offDayAskMinutes) || 10) * 60000;
+  o.state = "ASKING";
+  o.askId = (Number(o.askId) || 0) + 1;
+  o.askedAt = new Date(nowMs);
+  o.deadline = new Date(nowMs + windowMs);
+  out.events.push(ev("OFFDAY_ASKED", { t: nowMs }, "Asked whether the employee is working today (a day off)", { askId: o.askId }));
+  out.notes.push({ type: "OFFDAY_ASK", askId: o.askId, deadline: o.deadline });
+}
+
+function answerOffDay(att, ctx, answer, nowMs) {
+  const out = { events: [], notes: [], ok: false, code: "" };
+  ensureExtras(att);
+  const o = att.offDayAsk;
+  if (o.state !== "ASKING") {
+    out.code = o.state === "NO" ? "EXPIRED" : "NOT_ASKING";
+    return out;
+  }
+  if (nowMs > ms(o.deadline)) {
+    out.code = "EXPIRED";
+    return out;
+  }
+  o.answeredAt = new Date(nowMs);
+  o.deadline = null;
+  if (answer === "YES") {
+    o.state = "YES";
+    out.events.push(ev("OFFDAY_CONFIRMED", { t: nowMs }, "Confirmed working today (a day off) - counted separately"));
+    out.notes.push({ type: "OFFDAY_CONFIRMED" });
+  } else {
+    o.state = "NO";
+    const s = openSession(att);
+    if (s) {
+      closeOpenSession(att, ms(s.lastPresentAt) || ms(s.checkIn), "OFFDAY_DECLINED", nowMs);
+      out.notes.push({ type: "SESSION_ENDED", reason: "OFFDAY_DECLINED" });
+    }
+    out.events.push(ev("OFFDAY_DECLINED", { t: nowMs }, "Not working today (a day off) - nothing counted"));
+  }
+  out.ok = true;
+  out.code = "OK";
+  return out;
+}
+
+/** No reply within the window -> defaults to "not working": nothing counted, session ends, not asked again today. */
+function resolveOffDayDeadline(att, ctx, nowMs, out) {
+  const o = att.offDayAsk;
+  if (!o || o.state !== "ASKING" || nowMs <= ms(o.deadline)) return;
+  o.state = "NO";
+  o.deadline = null;
+  const s = openSession(att);
+  if (s) {
+    closeOpenSession(att, ms(s.lastPresentAt) || ms(s.checkIn), "OFFDAY_DECLINED", nowMs);
+    out.notes.push({ type: "SESSION_ENDED", reason: "OFFDAY_DECLINED" });
+  }
+  out.events.push(ev("OFFDAY_NO_RESPONSE", { t: nowMs }, "No reply to \"are you working today?\" - nothing counted"));
+  out.notes.push({ type: "OFFDAY_NO_RESPONSE" });
+}
+
+
 //                ends at the logout moment.
 //   unverified = it was not -> the timer stops at the LAST CONFIRMED office time.
 // ----------------------------------------------------
@@ -631,9 +731,11 @@ function recompute(att, ctx) {
   att.dayType = off ? off.type : "WORKING";
 
   if (off) {
-    // Work on a day off (Sunday / holiday) is extra work: kept in its own bucket,
-    // never counted as late, early or overtime.
-    att.offDayMinutes = total;
+    // Work on a day off (Sunday / holiday) is extra work: kept in its own bucket, never
+    // counted as late, early or overtime - but only once the person has confirmed they
+    // are actually working ("are you working today?" at their first check-in). A "NO"
+    // (or no reply at all) means nothing is counted, exactly as if it were ordinary leave.
+    att.offDayMinutes = att.offDayAsk?.state === "NO" ? 0 : total;
     att.overtimeMinutes = 0;
     att.lateMinutes = 0;
     att.earlyLogoutMinutes = 0;
@@ -672,6 +774,7 @@ module.exports = {
   isSignedOut,
   shiftEndAt,
   answerOvertime,
+  answerOffDay,
   signOut,
   signIn,
 };

@@ -85,6 +85,22 @@ const overtimeSchema = new mongoose.Schema(
 );
 
 // =====================================================
+// "ARE YOU WORKING TODAY?"  (asked once, at the first check-in on a day off - a
+// Sunday/holiday is normally leave, so nothing is counted unless they confirm)
+// NONE -> ASKING -> YES (counted, as offDayMinutes, same as before) | NO (not counted)
+// =====================================================
+const offDayAskSchema = new mongoose.Schema(
+  {
+    state: { type: String, enum: ["NONE", "ASKING", "YES", "NO"], default: "NONE" },
+    askId: { type: Number, default: 0 },
+    askedAt: { type: Date, default: null },
+    deadline: { type: Date, default: null },
+    answeredAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+// =====================================================
 // REVIEW  (no reply at shift end -> half day until the employee explains
 // and an administrator makes it Present)
 // =====================================================
@@ -190,6 +206,7 @@ const attendanceSchema = new mongoose.Schema(
     wifi: { type: wifiSchema, default: () => ({}) },
     crm: { type: crmSchema, default: () => ({}) },
     overtime: { type: overtimeSchema, default: () => ({}) },
+    offDayAsk: { type: offDayAskSchema, default: () => ({}) },
     review: { type: reviewSchema, default: () => ({}) },
 
     // true once the day has been closed out by the nightly job

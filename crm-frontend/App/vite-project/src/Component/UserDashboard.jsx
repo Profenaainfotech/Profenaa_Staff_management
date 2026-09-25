@@ -4,8 +4,6 @@ import {
   LayoutDashboard,
   CheckSquare,
   ChevronDown,
-  FolderKanban,
-  Hash,
   User,
   LogOut,
   Bell,
@@ -94,6 +92,22 @@ export default function UserDashboard() {
       }
     } catch {
       /* profile enrichment is best-effort; the rest of the dashboard still works without it */
+    }
+  };
+
+  // Keeps this tab marked as the active session while it is genuinely open. Logging in
+  // again in ANOTHER tab is blocked as long as this ping is recent - so this is what
+  // makes that block safe (a closed/crashed tab stops pinging and is not held onto).
+  const pingActive = async () => {
+    try {
+      const token = localStorage.getItem("authToken");
+      if (!token) return;
+      await fetch(`${USER_API_URL}/update-last-active`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      /* a missed ping just makes this tab look briefly idle; the next one recovers it */
     }
   };
 
@@ -199,6 +213,16 @@ export default function UserDashboard() {
       fetchUserTasks(userId, false, true);
     }, 5000);
 
+    return () => clearInterval(interval);
+  }, [userData]);
+
+  // Marks this tab as the active session (see pingActive) - right away, then every
+  // minute for as long as this tab stays open, so logging in elsewhere can tell a real,
+  // open tab apart from one that was simply closed or crashed.
+  useEffect(() => {
+    if (!userData) return;
+    pingActive();
+    const interval = setInterval(pingActive, 60000);
     return () => clearInterval(interval);
   }, [userData]);
 
@@ -499,7 +523,6 @@ export default function UserDashboard() {
     () => projectPool.filter((p) => myProjectsType === "All" || p.projectType === myProjectsType),
     [projectPool, myProjectsType]
   );
-  const myProjectsTechTasks = useMemo(() => tasks.filter((t) => t.projectType === "Technologies"), [tasks]);
 
   // =========================================================
   // NORMALIZE TASK STATUS
@@ -1338,7 +1361,7 @@ export default function UserDashboard() {
           top-0 left-0
           z-50
           w-64
-          h-screen
+          h-dvh
           bg-blue-950
           text-white
           border-r border-slate-800
@@ -1807,13 +1830,10 @@ export default function UserDashboard() {
               <div className="space-y-8">
                 <MyTechnologyProjects
                   tasks={tasks}
-                  todayDoneTitles={todayDoneTitles}
                   onOpenTasks={() => setActiveTab("My Tasks")}
                 />
                 <RecentProjects
                   pool={projectPool}
-                  tasks={tasks}
-                  todayDoneTitles={todayDoneTitles}
                   loading={projectLoading}
                   onChanged={reloadProjects}
                   onViewAll={() => setActiveTab("My Projects")}
@@ -1977,7 +1997,7 @@ export default function UserDashboard() {
               )}
 
               <div className="mb-6 flex flex-wrap gap-2" role="group" aria-label="Filter projects by type">
-                {["All", "Internal", "External", "Technologies"].map((t) => (
+                {["All", "Internal", "External"].map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -1994,43 +2014,7 @@ export default function UserDashboard() {
                 ))}
               </div>
 
-              {myProjectsType === "Technologies" ? (
-
-                myProjectsTechTasks.length === 0 ? (
-
-                  <EmptyState
-                    icon={<PackageOpen size={32} />}
-                    title="No Technologies work allocated to you"
-                    description="Work the administrator allocates to you will appear here."
-                  />
-
-                ) : (
-
-                  <div className="space-y-3">
-                    {myProjectsTechTasks.map((t) => {
-                      const remaining = (t.workItems || []).filter((i) => !todayDoneTitles.has(i.title));
-                      return (
-                        <article key={t._id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <h4 className="text-sm font-black text-slate-900">{t.title}</h4>
-                            {remaining.length === 0 ? (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700">
-                                <CheckCircle size={12} /> Done today
-                              </span>
-                            ) : (
-                              <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[10px] font-black text-teal-700">{remaining.length} left today</span>
-                            )}
-                          </div>
-                          <DomainChips domains={t.domains} className="mt-2" />
-                          {remaining.length > 0 && <WorkItemList items={remaining} domains={t.domains} className="mt-3 rounded-xl bg-slate-50 p-3" />}
-                        </article>
-                      );
-                    })}
-                  </div>
-
-                )
-
-              ) : projectLoading ? (
+              {projectLoading ? (
 
                 <div className="bg-white border border-slate-200 rounded-2xl py-12 text-center">
 
@@ -2278,71 +2262,100 @@ export default function UserDashboard() {
             <div>
 
               <div className="mb-6">
-                <h3 className="text-lg font-bold text-slate-900">My Profile</h3>
-                <p className="mt-1 text-xs text-slate-500">View your account information and work statistics.</p>
+
+                <h3 className="text-lg font-bold text-slate-900">
+                  My Profile
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  View your account information and work statistics.
+                </p>
+
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-3">
+              <div className="grid lg:grid-cols-3 gap-6">
 
-                {/* AVATAR / HERO CARD */}
-                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-6 text-white">
-                  <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-sky-500/10 blur-3xl" />
-                  <div className="absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
+                <div className="bg-slate-950 rounded-3xl p-6 text-white">
 
-                  <div className="relative z-10 flex flex-col items-center text-center">
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-400 text-white shadow-xl shadow-sky-500/30 ring-4 ring-white/10">
-                      <User size={40} />
+                  <div className="flex flex-col items-center text-center">
+
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-sky-500 to-cyan-400 flex items-center justify-center shadow-xl shadow-sky-500/20">
+
+                      <User size={34} />
+
                     </div>
 
-                    <h3 className="mt-4 text-xl font-black">{userData?.name || userData?.username || "User"}</h3>
-                    <p className="mt-0.5 text-xs font-semibold text-sky-300">{userData?.role || "Employee"}</p>
+                    <h3 className="font-bold text-lg mt-4">
 
-                    {userData?.dateOfBirth && (
-                      <p className="mt-3 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-200 border border-white/10">
-                        🎂 {fmtDob(userData.dateOfBirth)}
-                      </p>
-                    )}
+                      {userData?.name ||
+                        userData?.username ||
+                        "User"}
 
-                    <div className="mt-5 w-full space-y-2">
-                      <div className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2.5 text-[11px]">
-                        <span className="text-slate-400">Completion rate</span>
-                        <span className="font-black text-emerald-400">{totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0}%</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all" style={{ width: `${totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0}%` }} />
-                      </div>
-                    </div>
+                    </h3>
 
-                    <div className="mt-5 rounded-full border border-sky-400/20 bg-sky-500/10 px-3 py-1.5 text-[9px] text-sky-300">
+                    <p className="text-xs text-slate-400">
+                      Employee
+                    </p>
+
+                    <div className="mt-5 px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-400/20 text-[9px] text-sky-300">
                       Admin status synchronization enabled
                     </div>
+
                   </div>
+
                 </div>
 
-                {/* ACCOUNT INFORMATION */}
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 lg:col-span-2">
-                  <h3 className="mb-5 flex items-center gap-2 text-sm font-bold text-slate-900">
-                    <Info size={15} className="text-sky-600" /> Account Information
+                <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl p-6">
+
+                  <h3 className="font-bold text-sm mb-5">
+                    Account Information
                   </h3>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <ProfileRow icon={<User size={14} />} label="Username" value={userData?.name || userData?.username || "Not available"} />
-                    <ProfileRow icon={<ShieldCheck size={14} />} label="Role" value={userData?.role || "user"} />
-                    <ProfileRow icon={<CalendarDays size={14} />} label="Date of Birth" value={userData?.dateOfBirth ? fmtDob(userData.dateOfBirth) : "Not set"} />
-                    {userData?.learningMode && <ProfileRow icon={<CheckSquare size={14} />} label="Mode of Learning" value={userData.learningMode} />}
-                    {userData?.department && <ProfileRow icon={<FolderKanban size={14} />} label="Department" value={userData.department} />}
-                    <ProfileRow icon={<Hash size={14} />} label="User ID" value={userData?._id || userData?.id || "Not available"} mono />
+                  <div className="grid sm:grid-cols-2 gap-4">
+
+                    <ProfileRow
+                      label="User ID"
+                      value={
+                        userData?._id ||
+                        userData?.id ||
+                        "Not available"
+                      }
+                    />
+
+                    <ProfileRow
+                      label="Username"
+                      value={
+                        userData?.name ||
+                        userData?.username ||
+                        "Not available"
+                      }
+                    />
+
+                    <ProfileRow
+                      label="Role"
+                      value={
+                        userData?.role ||
+                        "user"
+                      }
+                    />
+
+                    <ProfileRow
+                      label="Total Tasks"
+                      value={totalTasks}
+                    />
+
+                    <ProfileRow
+                      label="Completed Tasks"
+                      value={completedTasks}
+                    />
+
+                    <ProfileRow
+                      label="Submitted Work"
+                      value={submittedTasks}
+                    />
+
                   </div>
 
-                  <h3 className="mb-4 mt-6 flex items-center gap-2 text-sm font-bold text-slate-900">
-                    <Activity size={15} className="text-sky-600" /> Work Statistics
-                  </h3>
-
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <StatPill icon={<FileText size={16} />} label="Total Tasks" value={totalTasks} tone="slate" />
-                    <StatPill icon={<CheckCircle size={16} />} label="Completed" value={completedTasks} tone="emerald" />
-                    <StatPill icon={<Upload size={16} />} label="Submitted Work" value={submittedTasks} tone="sky" />
-                  </div>
                 </div>
 
               </div>
@@ -3026,56 +3039,20 @@ function InfoCard({
 function ProfileRow({
   label,
   value,
-  icon,
-  mono,
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
 
-      <p className="flex items-center gap-1.5 text-[9px] font-semibold uppercase text-slate-400">
-        {icon}
+      <p className="text-[9px] uppercase text-slate-400 font-semibold">
         {label}
       </p>
 
-      <p className={`mt-1.5 text-sm font-semibold text-slate-800 break-all ${mono ? "font-mono text-xs" : ""}`}>
+      <p className="text-sm font-semibold text-slate-800 mt-1 break-all">
         {String(value ?? "")}
       </p>
 
     </div>
   );
-}
-
-// ===========================================================
-// STAT PILL  (Profile tab work statistics)
-// ===========================================================
-
-function StatPill({ icon, label, value, tone = "slate" }) {
-  const TONES = {
-    slate: "bg-slate-50 text-slate-600 border-slate-200",
-    emerald: "bg-emerald-50 text-emerald-600 border-emerald-200",
-    sky: "bg-sky-50 text-sky-600 border-sky-200",
-  };
-  return (
-    <div className={`rounded-xl border p-4 ${TONES[tone] || TONES.slate}`}>
-      <div className="flex items-center gap-2">
-        {icon}
-        <span className="text-2xl font-black">{value}</span>
-      </div>
-      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</p>
-    </div>
-  );
-}
-
-// ===========================================================
-// DATE OF BIRTH  ("YYYY-MM-DD" -> "17 June 1995", no timezone shift)
-// ===========================================================
-
-function fmtDob(value) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
-  if (!m) return "Not set";
-  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  const [, y, mo, d] = m;
-  return `${Number(d)} ${MONTHS[Number(mo) - 1] || ""} ${y}`;
 }
 
 // ===========================================================

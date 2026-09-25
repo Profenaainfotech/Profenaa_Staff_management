@@ -93,6 +93,7 @@ function Body() {
   const history = useAsync(() => api.get("/api/reports/my/list", { limit: 31 }), []);
   const report = res.data?.report || null;
   const submitted = report?.status === "SUBMITTED";
+  const editable = res.data?.editable !== false; // defaults open; the backend is the source of truth
   const att = res.data?.attendance;
   const shift = res.data?.shift;
 
@@ -178,9 +179,9 @@ function Body() {
     const msg = problems();
     if (msg) return toast(msg, "error");
     ask({
-      title: "Submit today's report?",
-      message: `${payload().entries.length} entries · ${fmtMinutes(reportedMin)} reported${tech ? ` · Technologies Task ${techDone.size}/${tech.items.length} (${pctText(tech.items.length ? Math.round((techDone.size / tech.items.length) * 1000) / 10 : null)})` : ""}. After submitting you cannot edit it unless an administrator reopens it.`,
-      confirmLabel: "Submit report",
+      title: submitted ? "Re-submit today's report?" : "Submit today's report?",
+      message: `${payload().entries.length} entries · ${fmtMinutes(reportedMin)} reported${tech ? ` · Technologies Task ${techDone.size}/${tech.items.length} (${pctText(tech.items.length ? Math.round((techDone.size / tech.items.length) * 1000) / 10 : null)})` : ""}. ${submitted ? "This updates your earlier submission." : "You can still correct it afterwards, within the 14-day edit window."}`,
+      confirmLabel: submitted ? "Re-submit" : "Submit report",
       onYes: async () => {
         setBusy("submit");
         try {
@@ -200,7 +201,7 @@ function Body() {
 
   if (res.loading && !res.data) return <Spinner />;
   if (res.error && !res.data) return <ErrorNote message={res.error} onRetry={res.reload} />;
-  const locked = submitted;
+  const locked = !editable;
 
   return (
     <div className="space-y-5">
@@ -228,15 +229,20 @@ function Body() {
             <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0"><CheckCircle2 size={22} /></div>
             <div>
               <p className="text-sm font-bold text-slate-900">{date === today ? "Today's report is submitted" : `The report for ${fmtDay(date)} is submitted`}. Thank you!</p>
-              <p className="text-xs text-slate-600 mt-1">Submitted at {fmtTime(report.submittedAt)}. You can view it below but it cannot be changed. If something needs correcting, ask your administrator to reopen it.</p>
+              <p className="text-xs text-slate-600 mt-1">
+                Submitted at {fmtTime(report.submittedAt)}.{" "}
+                {editable
+                  ? "You can still correct it below if you missed something - it stays marked as submitted either way."
+                  : "It is now outside the 14-day edit window and can no longer be changed. If something needs correcting, ask your administrator to reopen it."}
+              </p>
             </div>
           </div>
         </Card>
       )}
 
-      {submitted && tech && <TechWorkCard tech={tech} done={techDone} onToggle={() => {}} confirmed onConfirm={() => {}} />}
+      {submitted && !editable && tech && <TechWorkCard tech={tech} done={techDone} onToggle={() => {}} confirmed onConfirm={() => {}} />}
 
-      {!submitted && (
+      {editable && (
         <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
@@ -305,7 +311,7 @@ function Body() {
           <div className="flex flex-wrap items-center justify-end gap-2 mt-5">
             {dirty && <span className="text-[11px] text-amber-600 font-semibold mr-auto">Unsaved changes</span>}
             <Button variant="ghost" onClick={saveDraft} loading={busy === "draft"}><Save size={14} /> Save draft</Button>
-            <Button onClick={submit} loading={busy === "submit"}><Send size={14} /> Submit report</Button>
+            <Button onClick={submit} loading={busy === "submit"}><Send size={14} /> {submitted ? "Re-submit" : "Submit report"}</Button>
           </div>
         )}
       </Card>

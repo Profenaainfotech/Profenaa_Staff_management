@@ -292,6 +292,47 @@ scenario("YES can be answered during a REPEAT ask too, not just the first one", 
   assert.strictEqual(a.overtime.state, "CONFIRMED");
 });
 
+scenario("absolute safety cap: a session stuck ASKING (for any reason - a stuck sweep, a bug) is still force-closed eventually, never unbounded", () => {
+  const a = newDay();
+  core.applySignal(a, ctx, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "18:31:00"); // ask #1 fires
+  assert.strictEqual(a.overtime.state, "ASKING");
+  // simulate the monitor sweep itself not running for a long stretch (the exact bug
+  // report: heartbeats kept flowing fine, but nothing ever resolved the deadline) -
+  // heartbeats stay fresh throughout, but the tick that would process them is never
+  // called until long after. Once it finally runs, past the absolute cap, it must close
+  // the session outright - not just re-ask once more and leave it open again.
+  keepAliveMs(a, T("18:32:30"), T("09:30:00") + 16 * 3600 * 1000 + 5000);
+  const r = core.applyMonitorTick(a, ctx, new Date(T("09:30:00") + 16 * 3600 * 1000 + 5000)); // 16h+ since check-in
+  assert.deepStrictEqual(types(r), ["AUTO_CHECK_OUT"]);
+  assert.strictEqual(a.sessions[0].endReason, "AUTO_SHIFT_END");
+  assert.notStrictEqual(a.sessions[0].checkOut, null); // closed - no longer an unbounded timer
+});
+
+scenario("absolute safety cap also protects CONFIRMED (genuine) overtime - it just allows a much longer run first", () => {
+  const a = newDay();
+  core.applySignal(a, ctx, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "18:31:00");
+  core.answerOvertime(a, ctx, "YES", T("18:33:00"));
+  assert.strictEqual(a.overtime.state, "CONFIRMED");
+  keepAliveMs(a, T("18:34:00"), T("09:30:00") + 15.5 * 3600 * 1000);
+  const stillOpen = core.applyMonitorTick(a, ctx, new Date(T("09:30:00") + 15.5 * 3600 * 1000));
+  assert.strictEqual(a.sessions[0].checkOut, null); // confirmed overtime is allowed to keep running...
+  keepAliveMs(a, T("09:30:00") + 15.5 * 3600 * 1000 + 90000, T("09:30:00") + 16 * 3600 * 1000 + 5000);
+  const r = core.applyMonitorTick(a, ctx, new Date(T("09:30:00") + 16 * 3600 * 1000 + 5000));
+  assert.deepStrictEqual(types(r), ["AUTO_CHECK_OUT"]); // ...but not literally forever
+});
+
+scenario("absolute safety cap is configurable, and does not fire early on an ordinary day", () => {
+  const shortCap = { ...ctx, settings: { ...ctx.settings, absoluteMaxSessionHours: 4 } };
+  const a = newDay();
+  core.applySignal(a, shortCap, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "13:00:00"); // 3.5h in, well under the 4h absolute cap
+  const r = core.applyMonitorTick(a, shortCap, D("13:00:10"));
+  assert.strictEqual(a.sessions[0].checkOut, null);
+  assert.strictEqual(r.notes.length, 0);
+});
+
 scenario("safety net: readings replayed without the question still auto-close at shift end + 4h", () => {
   const a = newDay();
   core.applySignal(a, ctx, hb("09:30:00"));
@@ -398,6 +439,74 @@ scenario("answers after the window expire are rejected; a silent device is NOT p
   assert.strictEqual(b.review.state, "NONE");
   core.recompute(b, ctx);
   assert.strictEqual(b.status, "Completed");
+});
+
+scenario("day off, check-in: asked 'are you working today?' once, right away - not at shift end", () => {
+  const off = { ...ctx, offDay: { type: "WEEKLY_OFF" } };
+  const a = newDay();
+  const r = core.applySignal(a, off, hb("11:00:00"));
+  assert.ok(types(r).includes("OFFDAY_ASKED"));
+  assert.strictEqual(a.offDayAsk.state, "ASKING");
+  assert.strictEqual(a.offDayAsk.askId, 1);
+  assert.strictEqual(new Date(a.offDayAsk.deadline).getTime() - new Date(a.offDayAsk.askedAt).getTime(), 10 * 60000); // default offDayAskMinutes
+  // asked only once per day, not again on the next heartbeat
+  const r2 = core.applySignal(a, off, hb("11:01:30"));
+  assert.ok(!types(r2).includes("OFFDAY_ASKED"));
+});
+
+scenario("day off, answers YES: counted normally as offDayMinutes, exactly like today", () => {
+  const off = { ...ctx, offDay: { type: "WEEKLY_OFF" } };
+  const a = newDay();
+  core.applySignal(a, off, hb("11:00:00"));
+  const ans = core.answerOffDay(a, off, "YES", T("11:02:00"));
+  assert.ok(ans.ok);
+  assert.strictEqual(a.offDayAsk.state, "YES");
+  core.applySignal(a, off, hb("11:03:30"));
+  core.applySignal(a, off, { kind: "SHUTDOWN", t: D("13:00:00"), present: true, connected: true, live: true, ...OFFICE });
+  core.recompute(a, off);
+  assert.strictEqual(a.offDayMinutes, 120);
+  assert.strictEqual(a.status, "Completed");
+});
+
+scenario("day off, answers NO: nothing counted, and the session ends right there", () => {
+  const off = { ...ctx, offDay: { type: "WEEKLY_OFF" } };
+  const a = newDay();
+  core.applySignal(a, off, hb("11:00:00"));
+  core.applySignal(a, off, hb("11:03:00"));
+  const ans = core.answerOffDay(a, off, "NO", T("11:04:00")); // within the 10-minute window
+  assert.ok(ans.ok);
+  assert.strictEqual(a.offDayAsk.state, "NO");
+  assert.strictEqual(a.sessions[0].endReason, "OFFDAY_DECLINED");
+  assert.notStrictEqual(a.sessions[0].checkOut, null);
+  core.recompute(a, off);
+  assert.strictEqual(a.offDayMinutes, 0);
+  // does not restart even if they keep showing up on the network afterwards
+  core.applySignal(a, off, hb("12:00:00"));
+  assert.strictEqual(a.sessions.length, 1);
+});
+
+scenario("day off, no reply within the window: defaults to NOT working - nothing counted, session ends, not asked again", () => {
+  const off = { ...ctx, offDay: { type: "WEEKLY_OFF" } };
+  const a = newDay();
+  core.applySignal(a, off, hb("11:00:00"));
+  keepAliveMs(a, T("11:01:30"), T("11:09:30")); // keep the heartbeat fresh right up to just before the 10-minute deadline
+  const r = core.applyMonitorTick(a, off, new Date(T("11:00:00") + 10 * 60000 + 5000));
+  assert.ok(types(r).includes("OFFDAY_NO_RESPONSE"));
+  assert.strictEqual(a.offDayAsk.state, "NO");
+  assert.notStrictEqual(a.sessions[0].checkOut, null);
+  core.recompute(a, off);
+  assert.strictEqual(a.offDayMinutes, 0);
+  assert.strictEqual(a.review.state, "NONE"); // never penalised like a missed shift-end reply - it is simply not counted
+  // a late answer after the window is rejected, same as the overtime question
+  const late = core.answerOffDay(a, off, "YES", T("11:00:00") + 11 * 60000);
+  assert.ok(!late.ok);
+  assert.strictEqual(late.code, "EXPIRED");
+});
+
+scenario("an ordinary working day never asks 'are you working today?' - that question is for a day off only", () => {
+  const a = newDay();
+  core.applySignal(a, ctx, hb("09:30:00"));
+  assert.strictEqual(a.offDayAsk.state, "NONE");
 });
 
 scenario("Sunday / day off: all worked time goes to its own bucket, never late, never overtime, never absent", () => {

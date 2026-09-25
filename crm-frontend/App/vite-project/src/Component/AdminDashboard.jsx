@@ -1015,9 +1015,12 @@ export default function AdminDashboard() {
   useEffect(() => {
     const interval =
       setInterval(() => {
-        fetchUsers();
-        fetchTasks();
-        fetchSubmissions();
+        // background refresh: never show the loading spinner here, or the table
+        // unmounts and remounts on every tick, resetting scroll position (and briefly
+        // showing "No users/tasks found" while it is empty mid-swap)
+        fetchUsers(false);
+        fetchTasks(false);
+        fetchSubmissions(false);
       }, REFRESH_INTERVAL);
 
     return () =>
@@ -1296,8 +1299,8 @@ export default function AdminDashboard() {
   ===================================================== */
 
   const fetchUsers =
-    async () => {
-      setLoading(true);
+    async (showLoader = true) => {
+      if (showLoader) setLoading(true);
 
       try {
         const response =
@@ -1353,8 +1356,8 @@ export default function AdminDashboard() {
   ===================================================== */
 
   const fetchTasks =
-    async () => {
-      setTaskLoading(true);
+    async (showLoader = true) => {
+      if (showLoader) setTaskLoading(true);
 
       try {
         const response =
@@ -1479,8 +1482,8 @@ export default function AdminDashboard() {
   ===================================================== */
 
   const fetchSubmissions =
-    async () => {
-      setSubmissionLoading(
+    async (showLoader = true) => {
+      if (showLoader) setSubmissionLoading(
         true
       );
 
@@ -6646,190 +6649,66 @@ export default function AdminDashboard() {
 
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm">
 
-                {employeeStatusData.map(
-                  (
-                    employee
-                  ) => (
-                    <div
-                      key={
-                        employee
-                          .user
-                          ?._id ||
-                        employee.name
-                      }
-                      className={`bg-white border rounded-3xl p-5 shadow-sm ${
-                        employee.overdue >
-                        0
-                          ? "border-blue-200"
-                          : "border-blue-100"
-                      }`}
-                    >
+                <div className="hidden items-center gap-4 border-b border-blue-100 bg-sky-50/60 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 lg:flex">
+                  <span className="w-64 shrink-0">Employee</span>
+                  <span className="w-28 shrink-0">Working Time</span>
+                  <span className="flex-1">Tasks</span>
+                  <span className="w-40 shrink-0">Completion</span>
+                </div>
 
-                      <div className="flex items-center justify-between">
+                <div className="divide-y divide-blue-50">
+                  {employeeStatusData.map((employee) => (
+                    <div key={employee.user?._id || employee.name} className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:gap-4">
 
-                        <div className="flex items-center gap-3">
-
-                          <Avatar
-                            name={
-                              employee.name
-                            }
+                      <div className="flex w-64 shrink-0 items-center gap-3">
+                        <span className="relative shrink-0">
+                          <Avatar name={employee.name} />
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${
+                              employee.user?.isOnline === true ? "bg-emerald-500 animate-pulse" : "bg-slate-300"
+                            }`}
                           />
-
-                          <div>
-
-                            <p className="text-xs font-black">
-                              {
-                                employee.name
-                              }
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-black">{employee.name}</p>
+                          <p className="truncate text-[9px] text-slate-400">{employee.user?._id}</p>
+                          {employee.mobile && (
+                            <p className="mt-0.5 flex items-center gap-1 text-[9px] text-slate-400">
+                              <Phone size={10} /> {employee.mobile}
                             </p>
-
-                            <p className="text-[9px] text-slate-400">
-                              {
-                                employee
-                                  .user
-                                  ?._id
-                              }
-                            </p>
-
-                            {employee.mobile && (
-                              <p className="text-[9px] text-slate-400 flex items-center gap-1 mt-0.5">
-
-                                <Phone
-                                  size={10}
-                                />
-
-                                {
-                                  employee.mobile
-                                }
-
-                              </p>
-                            )}
-
-                          </div>
-
-                        </div>
-
-                        <span
-                          className={`w-3 h-3 rounded-full ${
-                            employee
-                              .user
-                              ?.isOnline ===
-                            true
-                              ? "bg-emerald-500 animate-pulse"
-                              : "bg-slate-300"
-                          }`}
-                        />
-
-                      </div>
-
-                      <div className="bg-sky-50/60 rounded-2xl p-3 mt-4">
-
-                        <div className="flex items-center justify-between">
-
-                          <span className="text-[10px] text-slate-400 font-bold">
-                            Working Time
-                          </span>
-
-                          <Clock
-                            size={14}
-                            className="text-slate-400"
-                          />
-
-                        </div>
-
-                        <p className="text-sm font-black mt-1">
-                          {formatWorkingTime(
-                            employee.user
                           )}
-                        </p>
-
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 mt-3">
-
-                        <MonitorMetric
-                          label="Total"
-                          value={
-                            employee.total
-                          }
-                        />
-
-                        <MonitorMetric
-                          label="Completed"
-                          value={
-                            employee.completed
-                          }
-                          success
-                        />
-
-                        <MonitorMetric
-                          label="Progress"
-                          value={
-                            employee.progress
-                          }
-                          warning
-                        />
-
-                        <MonitorMetric
-                          label="Pending"
-                          value={
-                            employee.pending
-                          }
-                        />
-
-                        <MonitorMetric
-                          label="Due Soon"
-                          value={
-                            employee.dueSoon
-                          }
-                          warning
-                        />
-
-                        <MonitorMetric
-                          label="Overdue"
-                          value={
-                            employee.overdue
-                          }
-                          danger
-                        />
-
+                      <div className="flex w-28 shrink-0 items-center gap-1.5 rounded-xl bg-sky-50/60 px-3 py-2 lg:bg-transparent lg:px-0 lg:py-0">
+                        <Clock size={13} className="shrink-0 text-slate-400" />
+                        <span className="text-xs font-black">{formatWorkingTime(employee.user)}</span>
                       </div>
 
-                      <div className="mt-4">
+                      <div className="flex flex-1 flex-wrap gap-1.5">
+                        <MonitorMetric label="Total" value={employee.total} />
+                        <MonitorMetric label="Completed" value={employee.completed} success />
+                        <MonitorMetric label="Progress" value={employee.progress} warning />
+                        <MonitorMetric label="Pending" value={employee.pending} />
+                        <MonitorMetric label="Due Soon" value={employee.dueSoon} warning />
+                        <MonitorMetric label="Overdue" value={employee.overdue} danger />
+                      </div>
 
-                        <div className="flex items-center justify-between mb-2">
-
-                          <span className="text-[10px] text-slate-400 font-bold">
-                            Completion
-                          </span>
-
-                          <span className="text-xs font-black">
-                            {
-                              employee.percentage
-                            }
-                            %
-                          </span>
-
+                      <div className="w-full shrink-0 lg:w-40">
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-400">Completion</span>
+                          <span className="text-xs font-black">{employee.percentage}%</span>
                         </div>
-
-                        <div className="h-2.5 bg-blue-100 rounded-full overflow-hidden">
-
-                          <div
-                            className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                            style={{
-                              width: `${employee.percentage}%`,
-                            }}
-                          />
-
+                        <div className="h-2 overflow-hidden rounded-full bg-blue-100">
+                          <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${employee.percentage}%` }} />
                         </div>
-
                       </div>
 
                     </div>
-                  )
-                )}
+                  ))}
+                </div>
 
               </div>
 

@@ -229,6 +229,44 @@ async function dispatchNotes(att, user, branch, ctx, notes) {
         });
       }
 
+      if (n.type === "OFFDAY_ASK") {
+        const mins = Number(ctx.settings?.offDayAskMinutes) || 10;
+        await notify.notifyUser(user._id, {
+          category: "attendance",
+          type: "OFFDAY_ASK",
+          severity: "warning",
+          title: "It's your day off - are you working today?",
+          message: `Answer within ${mins} minutes. Yes = counted separately as day-off work. No, or no reply, and nothing is counted.`,
+          link: "Attendance",
+          data: { sound: true },
+          dedupeKey: `off-ask:${user._id}:${day}:${n.askId}`,
+        });
+      }
+
+      if (n.type === "OFFDAY_CONFIRMED") {
+        await notify.notifyUser(user._id, {
+          category: "attendance",
+          type: "OFFDAY_CONFIRMED",
+          severity: "success",
+          title: "Today's work is being recorded",
+          message: "Counted separately as day-off work, not as a normal working day.",
+          link: "Attendance",
+          dedupeKey: `off-yes:${user._id}:${day}:${att.offDayAsk?.askId}`,
+        });
+      }
+
+      if (n.type === "OFFDAY_NO_RESPONSE") {
+        await notify.notifyUser(user._id, {
+          category: "attendance",
+          type: "OFFDAY_NO_RESPONSE",
+          severity: "info",
+          title: "Nothing counted today",
+          message: "You did not answer \"are you working today?\", so nothing was recorded - same as any other day off.",
+          link: "Attendance",
+          dedupeKey: `off-none:${user._id}:${day}`,
+        });
+      }
+
       if (n.type === "NO_RESPONSE") {
         await notify.notifyUser(user._id, {
           category: "attendance",
@@ -359,6 +397,7 @@ function liveState(att, ctx, now = new Date(), extra = {}) {
     overtimeMinutes: att?.overtimeMinutes || 0,
     offDayMinutes: att?.offDayMinutes || 0,
     overtimeState: att?.overtime?.state || "NONE",
+    offDayAskState: att?.offDayAsk?.state || "NONE",
     prompt:
       att?.overtime?.state === "ASKING" && att.overtime.deadline
         ? {
@@ -367,6 +406,14 @@ function liveState(att, ctx, now = new Date(), extra = {}) {
             deadline: att.overtime.deadline,
             secondsLeft: Math.max(0, Math.round((new Date(att.overtime.deadline).getTime() - now.getTime()) / 1000)),
             shiftEnd: ctx.shiftEnd,
+          }
+        : att?.offDayAsk?.state === "ASKING" && att.offDayAsk.deadline
+        ? {
+            type: "OFFDAY",
+            askId: att.offDayAsk.askId,
+            deadline: att.offDayAsk.deadline,
+            secondsLeft: Math.max(0, Math.round((new Date(att.offDayAsk.deadline).getTime() - now.getTime()) / 1000)),
+            dayType: att.dayType,
           }
         : null,
     review: att?.review && att.review.state && att.review.state !== "NONE" ? { state: att.review.state, reason: att.review.reason } : null,
@@ -868,6 +915,34 @@ async function answerOvertime(userId, answer, source = "WEB") {
 }
 
 // ----------------------------------------------------
+// "ARE YOU WORKING TODAY?"  (day off / Sunday)
+// ----------------------------------------------------
+async function answerOffDay(userId, answer, source = "WEB") {
+  const a = String(answer || "").toUpperCase();
+  if (!["YES", "NO"].includes(a)) throw Object.assign(new Error("Answer must be YES or NO"), { status: 400 });
+  const user = await User.findById(userId);
+  if (!user) throw Object.assign(new Error("Staff member not found"), { status: 404 });
+  const branch = user.branchId ? await Branch.findById(user.branchId) : null;
+  const settings = await getSettings();
+  const ctx = buildCtx(user, branch, settings);
+  const today = dateKey();
+
+  return withUserLock(user._id, async () => {
+    ctx.offDay = await offDayFor(settings, branch?._id, today);
+    const att = await Attendance.findOne({ userId: user._id, date: today });
+    if (!att) return { ok: false, code: "NOT_ASKING" };
+    const out = core.answerOffDay(att, ctx, a, Date.now());
+    if (!out.ok) return { ok: false, code: out.code };
+    core.recompute(att, ctx);
+    await att.save();
+    await persistEvents(att, user, att.deviceId, out.events.map((e) => ({ ...e, meta: { ...(e.meta || {}), source } })));
+    await dispatchNotes(att, user, branch || { name: "the office" }, ctx, out.notes);
+    notify.pushAttendanceUpdate(user._id, { date: today, state: att.wifi.state });
+    return { ok: true, code: "OK", state: att.offDayAsk.state };
+  });
+}
+
+// ----------------------------------------------------
 // No reply at shift end -> the employee explains -> an administrator decides
 // ----------------------------------------------------
 async function explainReview(userId, date, text) {
@@ -961,6 +1036,7 @@ module.exports = {
   onCrmLogin,
   onCrmLogout,
   answerOvertime,
+  answerOffDay,
   explainReview,
   decideReview,
 };

@@ -67,6 +67,12 @@ function checkDate(date) {
   if (date < addDays(today, -EDIT_WINDOW_DAYS)) throw httpError(400, `Reports can only be written for the last ${EDIT_WINDOW_DAYS} days`);
 }
 
+/** Same bounds as checkDate, without throwing - for deciding whether to show the report as editable. */
+function withinEditWindow(date) {
+  const today = dateKey();
+  return date <= today && date >= addDays(today, -EDIT_WINDOW_DAYS);
+}
+
 const sum = (entries) => entries.reduce((t, e) => t + (e.minutes || 0), 0);
 
 // ---------------- employee ----------------
@@ -87,7 +93,7 @@ const myReport = handle(async (req, res) => {
     report,
     attendance: att || null,
     shift: user ? { start: user.shiftStart, end: user.shiftEnd } : null,
-    editable: !report || report.status === "DRAFT",
+    editable: withinEditWindow(date),
     tech: techCard,
   });
 });
@@ -98,7 +104,9 @@ async function upsert(req, { submit }) {
   const userId = req.payload.id;
 
   let doc = await DailyReport.findOne({ userId, date });
-  if (doc && doc.status === "SUBMITTED") throw httpError(409, "This report is already submitted. Ask an administrator to reopen it.");
+  // A submitted report can still be corrected (entries, summary, ticks) within the normal
+  // edit window - it is never locked behind an admin "reopen" just because it was already
+  // sent in. Editing never un-submits it; it can only ever be re-submitted, not deleted.
 
   const user = await User.findById(userId).select("name role department branchId");
   if (!user) throw httpError(404, "Staff member not found");

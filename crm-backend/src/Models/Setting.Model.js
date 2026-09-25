@@ -56,6 +56,17 @@ const settingSchema = new mongoose.Schema(
     overtimeSound: { type: String, enum: ["ALARM", "URGENT_BEEPS", "SIREN"], default: "ALARM" },
     overtimeSoundSeconds: { type: Number, default: 5 }, // how long the alert sound plays each time
 
+    // Absolute last resort, regardless of the overtime question's state: no session is
+    // ever allowed to stay open longer than this, measured from check-in. Prevents a
+    // stuck sweep or an unanswered question from ever showing a runaway timer.
+    absoluteMaxSessionHours: { type: Number, default: 16 },
+
+    // Sunday / a holiday is normally leave: nothing is counted unless the person
+    // confirms they are actually working. Asked once, at the very first check-in of the
+    // day; this many minutes to answer before it defaults to "not working" (nothing
+    // counted, and it is not asked again that day).
+    offDayAskMinutes: { type: Number, default: 10 },
+
     // Reminder to submit the Daily Report this long after shift end (0 = off)
     dailyReportReminderMinutes: { type: Number, default: 15 },
 

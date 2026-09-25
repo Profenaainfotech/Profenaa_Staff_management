@@ -43,6 +43,8 @@ const VALIDATORS = {
   noResponseAction: (v) => (["HALF_DAY", "FLAG_ONLY", "AUTO_LOGOUT"].includes(v) ? v : undefined),
   overtimeSound: (v) => (["ALARM", "URGENT_BEEPS", "SIREN"].includes(v) ? v : undefined),
   overtimeSoundSeconds: intField(1, 30),
+  absoluteMaxSessionHours: intField(4, 24),
+  offDayAskMinutes: intField(1, 60),
   extraOfficeIps: (v) => {
     if (!Array.isArray(v)) return undefined;
     const list = v.map((x) => String(x).trim()).filter(Boolean);
