@@ -6,6 +6,7 @@ const app = require("../app");
 const connectWithDB = require("./Config/db.Config");
 const socket = require("./Services/socket");
 const monitor = require("./Services/attendanceMonitor");
+const birthdayReminder = require("./Services/birthdayReminder.service");
 
 const PORT = process.env.PORT || 8000;
 
@@ -23,4 +24,5 @@ httpServer.listen(PORT, async () => {
   await connectWithDB();
   console.log(`Server started on port ${PORT}`);
   monitor.start();
+  birthdayReminder.start();
 });

@@ -36,9 +36,13 @@ const VALIDATORS = {
   autoApproveFirstDevice: (v) => (typeof v === "boolean" ? v : undefined),
   requireOfficeWifiLogin: (v) => (typeof v === "boolean" ? v : undefined),
   overtimePromptMinutes: intField(1, 120),
+  overtimeRepeatMinutes: intField(1, 60),
+  overtimeMaxAsks: intField(1, 20),
   overtimeRecheckMinutes: intField(15, 480),
   dailyReportReminderMinutes: intField(0, 240),
-  noResponseAction: (v) => (["HALF_DAY", "FLAG_ONLY"].includes(v) ? v : undefined),
+  noResponseAction: (v) => (["HALF_DAY", "FLAG_ONLY", "AUTO_LOGOUT"].includes(v) ? v : undefined),
+  overtimeSound: (v) => (["ALARM", "URGENT_BEEPS", "SIREN"].includes(v) ? v : undefined),
+  overtimeSoundSeconds: intField(1, 30),
   extraOfficeIps: (v) => {
     if (!Array.isArray(v)) return undefined;
     const list = v.map((x) => String(x).trim()).filter(Boolean);

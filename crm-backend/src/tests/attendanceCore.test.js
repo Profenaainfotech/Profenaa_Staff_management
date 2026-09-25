@@ -32,6 +32,9 @@ const fmt = (d) => d && new Date(d).toISOString().slice(11, 19);
 let n = 0;
 const scenario = (name, fn) => { fn(); n += 1; console.log("  ✓", name); };
 
+const keepAlive = (a, from, to, extra = {}) => { for (let t = T(from); t <= T(to); t += 90 * 1000) core.applySignal(a, ctx, { ...hb("09:31:30"), t: new Date(t), ...extra }); };
+const keepAliveMs = (a, fromMs, toMs, extra = {}) => { for (let t = fromMs; t <= toMs; t += 90 * 1000) core.applySignal(a, ctx, { ...hb("09:31:30"), t: new Date(t), ...extra }); };
+
 console.log("attendanceCore");
 
 scenario("first present heartbeat checks in; later ones only extend the session", () => {
@@ -205,22 +208,88 @@ scenario("overnight laptop: presence at 02:00 cannot check in; 07:31 can; after 
   assert.deepStrictEqual(types(core.applySignal(a, ctx, hb("07:31:00"))), ["CHECK_IN"]);
 });
 
-scenario("forgotten laptop: nobody answers \"still working?\" -> session ends at shift END, day flagged half-day", () => {
+scenario("forgotten laptop, default settings: no reply repeats up to overtimeMaxAsks, THEN closes at shift end, day flagged half-day", () => {
   const a = newDay();
   core.applySignal(a, ctx, hb("09:30:00"));
-  let t = T("09:31:30");
-  while (t < T("18:45:00")) { core.applySignal(a, ctx, { ...hb("09:31:30"), t: new Date(t) }); t += 90 * 1000; }
-  assert.strictEqual(a.overtime.state, "ASKING"); // asked at the first healthy reading after 18:30
-  const r = core.applyMonitorTick(a, ctx, D("18:45:10")); // 10-minute window over, PC still online
-  assert.ok(types(r).includes("OVERTIME_NO_RESPONSE"));
+  keepAlive(a, "09:31:30", "18:31:00");
+  assert.strictEqual(a.overtime.state, "ASKING"); // ask #1, asked at the first healthy reading after 18:30
+  assert.strictEqual(a.overtime.askId, 1);
+  assert.strictEqual(a.overtime.unansweredCount, 1);
+  const deadline1 = new Date(a.overtime.deadline).getTime();
+  assert.strictEqual(deadline1 - new Date(a.overtime.askedAt).getTime(), 10 * 60000); // +10 min (overtimePromptMinutes default)
+
+  // window #1 over, still no reply, PC still online -> asked AGAIN instead of closing (default overtimeMaxAsks: 3)
+  keepAliveMs(a, T("18:32:30"), deadline1 + 9 * 60000);
+  const r2 = core.applyMonitorTick(a, ctx, new Date(deadline1 + 10 * 60000));
+  assert.ok(types(r2).includes("OVERTIME_ASKED_AGAIN"));
+  assert.strictEqual(a.overtime.state, "ASKING"); // not closed yet
+  assert.strictEqual(a.overtime.askId, 2);
+  assert.strictEqual(a.overtime.unansweredCount, 2);
+  const deadline2 = new Date(a.overtime.deadline).getTime();
+  assert.strictEqual(deadline2 - new Date(a.overtime.askedAt).getTime(), 5 * 60000); // +5 min (overtimeRepeatMinutes default)
+  assert.strictEqual(a.sessions[0].checkOut, null); // still open - not penalised mid-cycle
+
+  // window #2 over, still no reply -> asked a 3rd time
+  keepAliveMs(a, deadline2 - 8 * 60000, deadline2 + 4 * 60000);
+  const r3 = core.applyMonitorTick(a, ctx, new Date(deadline2 + 5 * 60000));
+  assert.ok(types(r3).includes("OVERTIME_ASKED_AGAIN"));
+  assert.strictEqual(a.overtime.askId, 3);
+  assert.strictEqual(a.overtime.unansweredCount, 3);
+  const deadline3 = new Date(a.overtime.deadline).getTime();
+
+  // window #3 (the last one: unansweredCount has now reached overtimeMaxAsks) over, still no reply -> NOW it closes
+  keepAliveMs(a, deadline3 - 8 * 60000, deadline3 + 4 * 60000);
+  const r4 = core.applyMonitorTick(a, ctx, new Date(deadline3 + 5 * 60000));
+  assert.ok(types(r4).includes("OVERTIME_NO_RESPONSE"));
   assert.strictEqual(a.sessions[0].endReason, "NO_RESPONSE");
   assert.strictEqual(fmt(a.sessions[0].checkOut), fmt(D("18:30:00"))); // no overtime credited
   assert.strictEqual(a.review.state, "PENDING_EXPLANATION");
+  assert.deepStrictEqual(r4.notes.map((x) => x.type), ["SESSION_ENDED", "NO_RESPONSE"]); // no FORCE_LOGOUT (default noResponseAction)
   core.recompute(a, ctx);
   assert.strictEqual(a.overtimeMinutes, 0);
   assert.strictEqual(a.status, "Half Day"); // 9 h worked, but held as a half day until explained
   assert.strictEqual(core.effectiveStatus(a, ctx.settings), "Half Day");
   assert.strictEqual(core.effectiveStatus(a, { ...ctx.settings, noResponseAction: "FLAG_ONLY" }), "Completed");
+});
+
+scenario("noResponseAction: AUTO_LOGOUT also raises a FORCE_LOGOUT note once every repeat ask is exhausted", () => {
+  const withAutoLogout = { ...ctx, settings: { ...ctx.settings, noResponseAction: "AUTO_LOGOUT", overtimeMaxAsks: 1, overtimePromptMinutes: 10 } };
+  const a = newDay();
+  core.applySignal(a, withAutoLogout, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "18:31:00");
+  const askedAt = new Date(a.overtime.deadline).getTime() - 10 * 60000;
+  keepAliveMs(a, askedAt, askedAt + 8 * 60000); // keep the heartbeat fresh right up to just before the deadline
+  // with overtimeMaxAsks: 1, the very first missed window is already the last one
+  const deadline = new Date(a.overtime.deadline).getTime();
+  const r = core.applyMonitorTick(a, withAutoLogout, new Date(deadline + 10000));
+  assert.ok(types(r).includes("OVERTIME_NO_RESPONSE"));
+  assert.deepStrictEqual(r.notes.map((x) => x.type), ["SESSION_ENDED", "NO_RESPONSE", "FORCE_LOGOUT"]);
+});
+
+scenario("overtimeMaxAsks: 1 preserves the original single-ask-then-close behaviour for anyone who configures it that way", () => {
+  const single = { ...ctx, settings: { ...ctx.settings, overtimeMaxAsks: 1 } };
+  const a = newDay();
+  core.applySignal(a, single, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "18:31:00");
+  const askedAt = new Date(a.overtime.deadline).getTime() - 10 * 60000;
+  keepAliveMs(a, askedAt, askedAt + 8 * 60000);
+  const deadline = new Date(a.overtime.deadline).getTime();
+  const r = core.applyMonitorTick(a, single, new Date(deadline + 10000));
+  assert.ok(types(r).includes("OVERTIME_NO_RESPONSE")); // closes on the very first missed window
+  assert.strictEqual(a.sessions[0].endReason, "NO_RESPONSE");
+});
+
+scenario("YES can be answered during a REPEAT ask too, not just the first one", () => {
+  const a = newDay();
+  core.applySignal(a, ctx, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "18:31:00");
+  const deadline1 = new Date(a.overtime.deadline).getTime();
+  keepAliveMs(a, T("18:32:30"), deadline1 + 9 * 60000);
+  core.applyMonitorTick(a, ctx, new Date(deadline1 + 10 * 60000)); // repeat ask #2 fires
+  assert.strictEqual(a.overtime.askId, 2);
+  const ans = core.answerOvertime(a, ctx, "YES", new Date(a.overtime.deadline).getTime() - 2 * 60000); // answered during the SECOND ask's window
+  assert.ok(ans.ok);
+  assert.strictEqual(a.overtime.state, "CONFIRMED");
 });
 
 scenario("safety net: readings replayed without the question still auto-close at shift end + 4h", () => {
@@ -269,7 +338,6 @@ scenario("finalStatus thresholds", () => {
 // =====================================================
 // SHIFT-END QUESTION, OVERTIME, SUNDAY, CRM LOGOUT
 // =====================================================
-const keepAlive = (a, from, to, extra = {}) => { for (let t = T(from); t <= T(to); t += 90 * 1000) core.applySignal(a, ctx, { ...hb("09:31:30"), t: new Date(t), ...extra }); };
 
 scenario("shift end: a healthy session is asked once; YES = overtime, tracked and re-asked hourly", () => {
   const a = newDay();
@@ -347,9 +415,10 @@ scenario("Sunday / day off: all worked time goes to its own bucket, never late, 
 
   // no reply on a day off is not penalised
   const b = newDay();
-  core.applySignal(b, off, hb("09:30:00"));
-  for (let t = T("09:31:30"); t < T("18:45:00"); t += 90000) core.applySignal(b, off, { ...hb("09:31:30"), t: new Date(t) });
-  core.applyMonitorTick(b, off, D("18:45:10"));
+  const offSingle = { ...off, settings: { ...off.settings, overtimeMaxAsks: 1 } };
+  core.applySignal(b, offSingle, hb("09:30:00"));
+  for (let t = T("09:31:30"); t < T("18:45:00"); t += 90000) core.applySignal(b, offSingle, { ...hb("09:31:30"), t: new Date(t) });
+  core.applyMonitorTick(b, offSingle, D("18:45:10"));
   assert.strictEqual(b.overtime.state, "NO_RESPONSE");
   assert.strictEqual(b.review.state, "NONE");
 });

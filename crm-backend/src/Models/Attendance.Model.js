@@ -71,6 +71,9 @@ const overtimeSchema = new mongoose.Schema(
   {
     state: { type: String, enum: ["NONE", "ASKING", "CONFIRMED", "DECLINED", "NO_RESPONSE"], default: "NONE" },
     askId: { type: Number, default: 0 },
+    // how many times we have asked, with no reply yet, in the CURRENT round (reset to 1
+    // each time a fresh "are you still working?" round starts - see attendanceCore.js)
+    unansweredCount: { type: Number, default: 0 },
     askedAt: { type: Date, default: null },
     deadline: { type: Date, default: null },
     // time up to which the person is already known to have been working

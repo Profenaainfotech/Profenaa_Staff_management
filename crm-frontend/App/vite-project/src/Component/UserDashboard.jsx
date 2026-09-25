@@ -3,6 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard,
   CheckSquare,
+  ChevronDown,
+  FolderKanban,
+  Hash,
   User,
   LogOut,
   Bell,
@@ -54,6 +57,7 @@ import { CalendarOff as LeavesNavIcon, ClipboardList as ReportNavIcon } from "lu
 const TASK_API_URL = `${API_ORIGIN}/api/Task`;
 const USER_API_URL = `${API_ORIGIN}/api/UserAccounts`;
 const PROJECT_API_URL = `${API_ORIGIN}/api/Project`;
+const REPORT_API_URL = `${API_ORIGIN}/api/reports`;
 
 // The project API needs the logged-in staff member's token on every call
 const projectAuth = () => ({
@@ -74,6 +78,46 @@ export default function UserDashboard() {
   // =========================================================
 
   const [userData, setUserData] = useState(null);
+
+  // Fields the login response doesn't include (date of birth, mode of learning, ...) -
+  // fetched once from /get-profile and merged into userData for the Profile tab.
+  const fetchOwnProfile = async () => {
+    try {
+      const token = localStorage.getItem("authToken");
+      if (!token) return;
+      const res = await fetch(`${USER_API_URL}/get-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.user) {
+        setUserData((prev) => (prev ? { ...prev, ...data.user } : data.user));
+      }
+    } catch {
+      /* profile enrichment is best-effort; the rest of the dashboard still works without it */
+    }
+  };
+
+  // Technologies work items ticked off ALREADY TODAY (title -> true), from today's Daily
+  // Report draft/submission. A Technologies task always stays in My Tasks (it is daily,
+  // recurring work) but only shows items NOT YET done today - what was ticked today is
+  // recorded in that day's Daily Report, not repeated here.
+  const [todayDoneTitles, setTodayDoneTitles] = useState(() => new Set());
+  const fetchTodayTechWork = async () => {
+    try {
+      const token = localStorage.getItem("authToken");
+      if (!token) return;
+      const res = await fetch(`${REPORT_API_URL}/my`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const done = (data?.tech?.items || []).filter((i) => i.done).map((i) => i.title);
+        setTodayDoneTitles(new Set(done));
+      }
+    } catch {
+      /* if this fails, Technologies tasks just show their full item list, which is still correct */
+    }
+  };
 
   // =========================================================
   // TASKS
@@ -213,6 +257,8 @@ export default function UserDashboard() {
             if (userId) {
               await fetchUserTasks(userId, true, false);
               await fetchProjectPool();
+              fetchOwnProfile();
+              fetchTodayTechWork();
 
               return;
             }
@@ -264,6 +310,8 @@ export default function UserDashboard() {
       if (userId) {
         await fetchUserTasks(userId, true, false);
         await fetchProjectPool();
+        fetchOwnProfile();
+        fetchTodayTechWork();
       }
     } catch (err) {
       console.error("LOAD USER ERROR:", err);
@@ -451,6 +499,7 @@ export default function UserDashboard() {
     () => projectPool.filter((p) => myProjectsType === "All" || p.projectType === myProjectsType),
     [projectPool, myProjectsType]
   );
+  const myProjectsTechTasks = useMemo(() => tasks.filter((t) => t.projectType === "Technologies"), [tasks]);
 
   // =========================================================
   // NORMALIZE TASK STATUS
@@ -1183,6 +1232,7 @@ export default function UserDashboard() {
       // Projects are visible both on the Dashboard (Recent Projects) and the My Projects
       // tab, so refresh them either way - not just when My Projects happens to be open.
       fetchProjectPool();
+      fetchTodayTechWork();
     }
   };
 
@@ -1757,10 +1807,13 @@ export default function UserDashboard() {
               <div className="space-y-8">
                 <MyTechnologyProjects
                   tasks={tasks}
+                  todayDoneTitles={todayDoneTitles}
                   onOpenTasks={() => setActiveTab("My Tasks")}
                 />
                 <RecentProjects
                   pool={projectPool}
+                  tasks={tasks}
+                  todayDoneTitles={todayDoneTitles}
                   loading={projectLoading}
                   onChanged={reloadProjects}
                   onViewAll={() => setActiveTab("My Projects")}
@@ -1792,7 +1845,12 @@ export default function UserDashboard() {
               </div>
 
               <TaskList
-                tasks={tasks}
+                tasks={tasks.filter(
+                  (t) =>
+                    t.projectType === "Technologies" ||
+                    normalizeTaskStatus(t.status) !== "Completed"
+                )}
+                todayDoneTitles={todayDoneTitles}
                 loading={loading}
                 formatDate={formatDate}
                 getStatusClass={getStatusClass}
@@ -1919,7 +1977,7 @@ export default function UserDashboard() {
               )}
 
               <div className="mb-6 flex flex-wrap gap-2" role="group" aria-label="Filter projects by type">
-                {["All", "Internal", "External"].map((t) => (
+                {["All", "Internal", "External", "Technologies"].map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -1936,7 +1994,43 @@ export default function UserDashboard() {
                 ))}
               </div>
 
-              {projectLoading ? (
+              {myProjectsType === "Technologies" ? (
+
+                myProjectsTechTasks.length === 0 ? (
+
+                  <EmptyState
+                    icon={<PackageOpen size={32} />}
+                    title="No Technologies work allocated to you"
+                    description="Work the administrator allocates to you will appear here."
+                  />
+
+                ) : (
+
+                  <div className="space-y-3">
+                    {myProjectsTechTasks.map((t) => {
+                      const remaining = (t.workItems || []).filter((i) => !todayDoneTitles.has(i.title));
+                      return (
+                        <article key={t._id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <h4 className="text-sm font-black text-slate-900">{t.title}</h4>
+                            {remaining.length === 0 ? (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700">
+                                <CheckCircle size={12} /> Done today
+                              </span>
+                            ) : (
+                              <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[10px] font-black text-teal-700">{remaining.length} left today</span>
+                            )}
+                          </div>
+                          <DomainChips domains={t.domains} className="mt-2" />
+                          {remaining.length > 0 && <WorkItemList items={remaining} domains={t.domains} className="mt-3 rounded-xl bg-slate-50 p-3" />}
+                        </article>
+                      );
+                    })}
+                  </div>
+
+                )
+
+              ) : projectLoading ? (
 
                 <div className="bg-white border border-slate-200 rounded-2xl py-12 text-center">
 
@@ -2184,100 +2278,71 @@ export default function UserDashboard() {
             <div>
 
               <div className="mb-6">
-
-                <h3 className="text-lg font-bold text-slate-900">
-                  My Profile
-                </h3>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  View your account information and work statistics.
-                </p>
-
+                <h3 className="text-lg font-bold text-slate-900">My Profile</h3>
+                <p className="mt-1 text-xs text-slate-500">View your account information and work statistics.</p>
               </div>
 
-              <div className="grid lg:grid-cols-3 gap-6">
+              <div className="grid gap-6 lg:grid-cols-3">
 
-                <div className="bg-slate-950 rounded-3xl p-6 text-white">
+                {/* AVATAR / HERO CARD */}
+                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-6 text-white">
+                  <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-sky-500/10 blur-3xl" />
+                  <div className="absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
 
-                  <div className="flex flex-col items-center text-center">
-
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-sky-500 to-cyan-400 flex items-center justify-center shadow-xl shadow-sky-500/20">
-
-                      <User size={34} />
-
+                  <div className="relative z-10 flex flex-col items-center text-center">
+                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-400 text-white shadow-xl shadow-sky-500/30 ring-4 ring-white/10">
+                      <User size={40} />
                     </div>
 
-                    <h3 className="font-bold text-lg mt-4">
+                    <h3 className="mt-4 text-xl font-black">{userData?.name || userData?.username || "User"}</h3>
+                    <p className="mt-0.5 text-xs font-semibold text-sky-300">{userData?.role || "Employee"}</p>
 
-                      {userData?.name ||
-                        userData?.username ||
-                        "User"}
+                    {userData?.dateOfBirth && (
+                      <p className="mt-3 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-200 border border-white/10">
+                        🎂 {fmtDob(userData.dateOfBirth)}
+                      </p>
+                    )}
 
-                    </h3>
+                    <div className="mt-5 w-full space-y-2">
+                      <div className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2.5 text-[11px]">
+                        <span className="text-slate-400">Completion rate</span>
+                        <span className="font-black text-emerald-400">{totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0}%</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all" style={{ width: `${totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0}%` }} />
+                      </div>
+                    </div>
 
-                    <p className="text-xs text-slate-400">
-                      Employee
-                    </p>
-
-                    <div className="mt-5 px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-400/20 text-[9px] text-sky-300">
+                    <div className="mt-5 rounded-full border border-sky-400/20 bg-sky-500/10 px-3 py-1.5 text-[9px] text-sky-300">
                       Admin status synchronization enabled
                     </div>
-
                   </div>
-
                 </div>
 
-                <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl p-6">
-
-                  <h3 className="font-bold text-sm mb-5">
-                    Account Information
+                {/* ACCOUNT INFORMATION */}
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 lg:col-span-2">
+                  <h3 className="mb-5 flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <Info size={15} className="text-sky-600" /> Account Information
                   </h3>
 
-                  <div className="grid sm:grid-cols-2 gap-4">
-
-                    <ProfileRow
-                      label="User ID"
-                      value={
-                        userData?._id ||
-                        userData?.id ||
-                        "Not available"
-                      }
-                    />
-
-                    <ProfileRow
-                      label="Username"
-                      value={
-                        userData?.name ||
-                        userData?.username ||
-                        "Not available"
-                      }
-                    />
-
-                    <ProfileRow
-                      label="Role"
-                      value={
-                        userData?.role ||
-                        "user"
-                      }
-                    />
-
-                    <ProfileRow
-                      label="Total Tasks"
-                      value={totalTasks}
-                    />
-
-                    <ProfileRow
-                      label="Completed Tasks"
-                      value={completedTasks}
-                    />
-
-                    <ProfileRow
-                      label="Submitted Work"
-                      value={submittedTasks}
-                    />
-
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ProfileRow icon={<User size={14} />} label="Username" value={userData?.name || userData?.username || "Not available"} />
+                    <ProfileRow icon={<ShieldCheck size={14} />} label="Role" value={userData?.role || "user"} />
+                    <ProfileRow icon={<CalendarDays size={14} />} label="Date of Birth" value={userData?.dateOfBirth ? fmtDob(userData.dateOfBirth) : "Not set"} />
+                    {userData?.learningMode && <ProfileRow icon={<CheckSquare size={14} />} label="Mode of Learning" value={userData.learningMode} />}
+                    {userData?.department && <ProfileRow icon={<FolderKanban size={14} />} label="Department" value={userData.department} />}
+                    <ProfileRow icon={<Hash size={14} />} label="User ID" value={userData?._id || userData?.id || "Not available"} mono />
                   </div>
 
+                  <h3 className="mb-4 mt-6 flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <Activity size={15} className="text-sky-600" /> Work Statistics
+                  </h3>
+
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <StatPill icon={<FileText size={16} />} label="Total Tasks" value={totalTasks} tone="slate" />
+                    <StatPill icon={<CheckCircle size={16} />} label="Completed" value={completedTasks} tone="emerald" />
+                    <StatPill icon={<Upload size={16} />} label="Submitted Work" value={submittedTasks} tone="sky" />
+                  </div>
                 </div>
 
               </div>
@@ -2299,6 +2364,7 @@ export default function UserDashboard() {
 
 function TaskList({
   tasks,
+  todayDoneTitles,
   loading,
   formatDate,
   getStatusClass,
@@ -2326,19 +2392,13 @@ function TaskList({
   setCommentTaskId,
   commentingTaskId,
 }) {
+  const [expandedId, setExpandedId] = useState(null);
+
   if (loading) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl py-16 text-center">
-
-        <Loader2
-          size={30}
-          className="animate-spin mx-auto text-sky-500"
-        />
-
-        <p className="text-xs text-slate-500 mt-3">
-          Loading tasks...
-        </p>
-
+        <Loader2 size={30} className="animate-spin mx-auto text-sky-500" />
+        <p className="text-xs text-slate-500 mt-3">Loading tasks...</p>
       </div>
     );
   }
@@ -2354,564 +2414,292 @@ function TaskList({
   }
 
   return (
-    <div className="space-y-5">
-
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       {tasks.map((task) => {
-
-        const submissionStatus =
-          getSubmissionStatusLabel(task);
-
-        const content =
-          getSubmissionContent(task);
-
-        const url =
-          getSubmissionUrl(task);
-
-        const command =
-          getSubmissionCommand(task);
-
-        const submittedAt =
-          getSubmittedAt(task);
-
-        const alreadySubmitted =
-          hasSubmission(task);
-
-        const taskStatus =
-          normalizeDisplayStatus(
-            task.status
-          );
+        const submissionStatus = getSubmissionStatusLabel(task);
+        const content = getSubmissionContent(task);
+        const url = getSubmissionUrl(task);
+        const command = getSubmissionCommand(task);
+        const submittedAt = getSubmittedAt(task);
+        const alreadySubmitted = hasSubmission(task);
+        const taskStatus = normalizeDisplayStatus(task.status);
+        const isTech = task.projectType === "Technologies";
+        const remainingItems = isTech ? (task.workItems || []).filter((i) => !todayDoneTitles.has(i.title)) : [];
+        const expanded = expandedId === task._id;
 
         return (
-          <div
-            key={task._id}
-            className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition"
-          >
+          <div key={task._id} className="border-b border-slate-100 last:border-b-0">
 
-            <div className="p-5 sm:p-6">
+            {/* ===== COMPACT ROW (always visible) ===== */}
+            <button
+              type="button"
+              onClick={() => setExpandedId(expanded ? null : task._id)}
+              className="flex w-full flex-col gap-3 px-4 py-3 text-left transition hover:bg-slate-50/80 sm:flex-row sm:items-center sm:gap-4"
+              aria-expanded={expanded}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                <CheckSquare size={17} />
+              </div>
 
-              <div className="flex flex-col lg:flex-row justify-between gap-4">
-
-                <div className="flex gap-3 min-w-0">
-
-                  <div className="w-11 h-11 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-                    <CheckSquare size={19} />
-                  </div>
-
-                  <div className="min-w-0">
-
-                    <h3 className="font-bold text-sm text-slate-900 break-words">
-                      {task.title ||
-                        "Untitled Task"}
-                    </h3>
-
-                    {task.projectType === "Technologies" ? (
-                      <>
-                        <DomainChips
-                          domains={task.domains}
-                          className="mt-2"
-                        />
-                        <WorkItemList
-                          items={task.workItems}
-                          domains={task.domains}
-                          className="mt-3 rounded-xl bg-slate-50 p-3"
-                        />
-                      </>
-                    ) : (
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed break-words">
-                        {task.description ||
-                          "No description"}
-                      </p>
-                    )}
-
-                  </div>
-
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <h3 className="truncate text-sm font-bold text-slate-900">{task.title || "Untitled Task"}</h3>
+                  {isTech && (
+                    <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-black text-teal-700">Technologies</span>
+                  )}
                 </div>
+                {isTech ? (
+                  remainingItems.length === 0 ? (
+                    <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-600">
+                      <CheckCircle size={12} /> All done for today!
+                    </p>
+                  ) : (
+                    <p className="mt-1 truncate text-[11px] text-slate-500">
+                      {remainingItems.length} of {task.workItems?.length || 0} item{task.workItems?.length === 1 ? "" : "s"} still to do today
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-1 truncate text-[11px] text-slate-500">{task.description || "No description"}</p>
+                )}
+              </div>
 
-                <div className="flex flex-wrap gap-2 shrink-0">
-
-                  <span
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold ${getStatusClass(
-                      taskStatus
-                    )}`}
-                  >
-                    {getStatusIcon(
-                      taskStatus,
-                      13
-                    )}
-
-                    Task: {taskStatus}
-
-                  </span>
-
-                  <span
-                    className={`px-3 py-1.5 rounded-full border text-[10px] font-bold ${getSubmissionStatusClass(
-                      submissionStatus
-                    )}`}
-                  >
-                    Submission:{" "}
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] font-bold ${getStatusClass(taskStatus)}`}>
+                  {getStatusIcon(taskStatus, 12)}
+                  {taskStatus}
+                </span>
+                {!isTech && (
+                  <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] font-bold ${getSubmissionStatusClass(submissionStatus)}`}>
                     {submissionStatus}
                   </span>
-
-                </div>
-
+                )}
+                <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
               </div>
+            </button>
 
-              <AdminStatusMessage
-                status={taskStatus}
-                hasSubmission={alreadySubmitted}
-              />
+            {/* ===== EXPANDED DETAILS ===== */}
+            {expanded && (
+              <div className="border-t border-slate-100 bg-slate-50/40 p-4 sm:p-5">
 
-              <div className="grid sm:grid-cols-3 gap-3 mt-5">
-
-                <InfoCard
-                  icon={<User size={14} />}
-                  title="Assigned By"
-                  value={
-                    task.assignedBy ||
-                    "Admin"
-                  }
-                />
-
-                <InfoCard
-                  icon={
-                    <CalendarDays size={14} />
-                  }
-                  title="Assigned At"
-                  value={formatDate(
-                    task.assignedAt
-                  )}
-                />
-
-                <InfoCard
-                  icon={<Clock size={14} />}
-                  title="Due Date"
-                  value={formatDate(
-                    task.dueDate
-                  )}
-                />
-
-              </div>
-
-              {/* WORK SUBMISSION */}
-
-              <div className="mt-6 border border-sky-100 bg-gradient-to-br from-sky-50/80 to-cyan-50/50 rounded-2xl overflow-hidden">
-
-                <div className="p-4 border-b border-sky-100">
-
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-
-                    <div className="flex items-center gap-3">
-
-                      <div className="w-10 h-10 bg-sky-100 text-sky-600 rounded-xl flex items-center justify-center shrink-0">
-                        <Upload size={17} />
+                {isTech ? (
+                  <>
+                    <DomainChips domains={task.domains} className="mb-3" />
+                    {remainingItems.length === 0 ? (
+                      <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700">
+                        <CheckCircle size={16} /> Everything allocated to you is ticked for today. New items reappear tomorrow.
                       </div>
+                    ) : (
+                      <WorkItemList items={remainingItems} domains={task.domains} className="rounded-xl bg-white p-3" />
+                    )}
+                    <div className="mt-4 flex items-start gap-2 rounded-xl border border-sky-100 bg-sky-50 p-3">
+                      <Info size={14} className="mt-0.5 shrink-0 text-sky-600" />
+                      <p className="text-[11px] leading-relaxed text-sky-700">
+                        This is daily, recurring work - tick what you complete each day in your <strong>Daily Report</strong>. It is not "submitted" here like a one-off task.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="mb-4 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">{task.description || "No description"}</p>
 
-                      <div>
+                    <AdminStatusMessage status={taskStatus} hasSubmission={alreadySubmitted} />
 
-                        <h4 className="font-bold text-xs text-slate-900">
-                          Work Submission
-                        </h4>
-
-                        <p className="text-[9px] text-slate-500 mt-1">
-                          Submit completed work and Google Drive link
-                        </p>
-
-                      </div>
-
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <InfoCard icon={<User size={14} />} title="Assigned By" value={task.assignedBy || "Admin"} />
+                      <InfoCard icon={<CalendarDays size={14} />} title="Assigned At" value={formatDate(task.assignedAt)} />
+                      <InfoCard icon={<Clock size={14} />} title="Due Date" value={formatDate(task.dueDate)} />
                     </div>
 
-                    <span
-                      className={`w-fit px-3 py-1.5 rounded-full border text-[9px] font-bold ${getSubmissionStatusClass(
-                        submissionStatus
-                      )}`}
-                    >
-                      {submissionStatus}
-                    </span>
+                    {/* WORK SUBMISSION */}
+                    <div className="mt-5 overflow-hidden rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50/80 to-cyan-50/50">
+                      <div className="border-b border-sky-100 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
+                              <Upload size={17} />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900">Work Submission</h4>
+                              <p className="mt-1 text-[9px] text-slate-500">Submit completed work and Google Drive link</p>
+                            </div>
+                          </div>
+                          <span className={`w-fit shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-[9px] font-bold ${getSubmissionStatusClass(submissionStatus)}`}>
+                            {submissionStatus}
+                          </span>
+                        </div>
+                      </div>
 
+                      <div className="p-4">
+                        {alreadySubmitted ? (
+                          <div className="rounded-2xl border border-sky-100 bg-white p-4">
+                            <div className="mb-4 flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle size={16} className="text-emerald-600" />
+                                <span className="text-xs font-bold text-emerald-700">Work Submitted</span>
+                              </div>
+                              <span className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 text-[9px] font-bold ${getSubmissionStatusClass(submissionStatus)}`}>
+                                {submissionStatus}
+                              </span>
+                            </div>
+                            <SubmissionDisplay content={content} url={url} command={command} submittedAt={submittedAt} formatDate={formatDate} />
+                          </div>
+                        ) : submissionTaskId === task._id ? (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="mb-1.5 block text-[10px] font-bold text-slate-700">Completed Work / Content Description</label>
+                              <textarea
+                                value={submissionContent}
+                                onChange={(e) => setSubmissionContent(e.target.value)}
+                                placeholder="Describe the work you completed..."
+                                rows={6}
+                                className="w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1.5 block text-[10px] font-bold text-slate-700">Google Drive / Work URL</label>
+                              <div className="relative">
+                                <LinkIcon size={15} className="absolute left-3 top-3.5 text-slate-400" />
+                                <input
+                                  type="url"
+                                  value={submissionUrl}
+                                  onChange={(e) => setSubmissionUrl(e.target.value)}
+                                  placeholder="https://drive.google.com/..."
+                                  className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-3 text-xs text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-start gap-2 rounded-xl border border-sky-100 bg-sky-50 p-3">
+                              <Info size={14} className="mt-0.5 shrink-0 text-sky-600" />
+                              <p className="text-[9px] leading-relaxed text-sky-700">
+                                Submitting your work does not automatically make the task Completed. The administrator will review your submission and control the final task status.
+                              </p>
+                            </div>
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                              <button
+                                onClick={() => submitTaskWork(task._id)}
+                                disabled={submittingTaskId === task._id}
+                                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-sky-600 py-3 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                              >
+                                {submittingTaskId === task._id ? (
+                                  <>
+                                    <Loader2 size={15} className="animate-spin" /> Submitting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send size={14} /> Submit Work
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSubmissionTaskId(null);
+                                  setSubmissionContent("");
+                                  setSubmissionUrl("");
+                                }}
+                                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xs text-slate-700 hover:bg-slate-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <button
+                              onClick={() => {
+                                setSubmissionTaskId(task._id);
+                                setSubmissionContent("");
+                                setSubmissionUrl("");
+                              }}
+                              className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 py-3 text-xs font-semibold text-white shadow-lg shadow-sky-600/10 transition hover:bg-sky-700"
+                            >
+                              <Upload size={15} /> Add Completed Work & Drive Link
+                            </button>
+                            <p className="mt-2 text-center text-[9px] text-slate-400">Submit your completed work for administrator review.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* COMMENTS - shared by every task type */}
+                <div className="mt-5 rounded-2xl border border-slate-100 bg-white/70 p-4">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare size={15} className="text-sky-600" />
+                      <h4 className="text-xs font-bold">Comments</h4>
+                    </div>
+                    {task.comments?.length > 0 && (
+                      <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[9px]">{task.comments.length} comments</span>
+                    )}
                   </div>
 
-                </div>
-
-                <div className="p-4">
-
-                  {alreadySubmitted ? (
-
-                    <div className="bg-white border border-sky-100 rounded-2xl p-4">
-
-                      <div className="flex items-center justify-between gap-3 mb-4">
-
-                        <div className="flex items-center gap-2">
-
-                          <CheckCircle
-                            size={16}
-                            className="text-emerald-600"
-                          />
-
-                          <span className="text-xs font-bold text-emerald-700">
-                            Work Submitted
-                          </span>
-
+                  {task.comments?.length > 0 && (
+                    <div className="mb-4 space-y-2">
+                      {task.comments.map((comment, index) => (
+                        <div key={comment?._id || index} className="rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="flex flex-col justify-between gap-1 sm:flex-row sm:items-center">
+                            <strong className="text-xs text-slate-800">{comment?.userName || "User"}</strong>
+                            <span className="text-[9px] text-slate-400">{formatDate(comment?.createdAt)}</span>
+                          </div>
+                          <p className="mt-2 whitespace-pre-wrap text-xs text-slate-600">{comment?.comment || ""}</p>
                         </div>
-
-                        <span
-                          className={`px-2.5 py-1 rounded-full border text-[9px] font-bold ${getSubmissionStatusClass(
-                            submissionStatus
-                          )}`}
-                        >
-                          {submissionStatus}
-                        </span>
-
-                      </div>
-
-                      <SubmissionDisplay
-                        content={content}
-                        url={url}
-                        command={command}
-                        submittedAt={
-                          submittedAt
-                        }
-                        formatDate={
-                          formatDate
-                        }
-                      />
-
+                      ))}
                     </div>
+                  )}
 
-                  ) : submissionTaskId ===
-                    task._id ? (
-
-                    <div className="space-y-4">
-
-                      <div>
-
-                        <label className="block text-[10px] font-bold text-slate-700 mb-1.5">
-                          Completed Work / Content Description
-                        </label>
-
-                        <textarea
-                          value={
-                            submissionContent
-                          }
-                          onChange={(e) =>
-                            setSubmissionContent(
-                              e.target.value
-                            )
-                          }
-                          placeholder="Describe the work you completed..."
-                          rows={6}
-                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 resize-none"
-                        />
-
-                      </div>
-
-                      <div>
-
-                        <label className="block text-[10px] font-bold text-slate-700 mb-1.5">
-                          Google Drive / Work URL
-                        </label>
-
-                        <div className="relative">
-
-                          <LinkIcon
-                            size={15}
-                            className="absolute left-3 top-3.5 text-slate-400"
-                          />
-
-                          <input
-                            type="url"
-                            value={
-                              submissionUrl
-                            }
-                            onChange={(e) =>
-                              setSubmissionUrl(
-                                e.target.value
-                              )
-                            }
-                            placeholder="https://drive.google.com/..."
-                            className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-3 py-3 text-xs text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                          />
-
-                        </div>
-
-                      </div>
-
-                      <div className="flex items-start gap-2 bg-sky-50 border border-sky-100 rounded-xl p-3">
-
-                        <Info
-                          size={14}
-                          className="text-sky-600 mt-0.5 shrink-0"
-                        />
-
-                        <p className="text-[9px] text-sky-700 leading-relaxed">
-                          Submitting your work does not automatically make the task Completed. The administrator will review your submission and control the final task status.
-                        </p>
-
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-2">
-
+                  {commentTaskId === task._id ? (
+                    <div className="space-y-2">
+                      <textarea
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        placeholder="Enter your comment..."
+                        rows={3}
+                        className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      />
+                      <div className="flex gap-2">
                         <button
-                          onClick={() =>
-                            submitTaskWork(
-                              task._id
-                            )
-                          }
-                          disabled={
-                            submittingTaskId ===
-                            task._id
-                          }
-                          className="flex-1 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white py-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition"
+                          onClick={() => addComment(task._id)}
+                          disabled={commentingTaskId === task._id}
+                          className="flex-1 rounded-xl bg-slate-950 py-2.5 text-xs text-white transition hover:bg-slate-800 disabled:opacity-50"
                         >
-
-                          {submittingTaskId ===
-                          task._id ? (
+                          {commentingTaskId === task._id ? "Adding..." : (
                             <>
-                              <Loader2
-                                size={15}
-                                className="animate-spin"
-                              />
-                              Submitting...
-                            </>
-                          ) : (
-                            <>
-                              <Send size={14} />
-                              Submit Work
+                              <Send size={14} className="mr-2 inline" /> Add Comment
                             </>
                           )}
-
                         </button>
-
                         <button
                           onClick={() => {
-                            setSubmissionTaskId(
-                              null
-                            );
-
-                            setSubmissionContent(
-                              ""
-                            );
-
-                            setSubmissionUrl(
-                              ""
-                            );
+                            setCommentTaskId(null);
+                            setCommentText("");
                           }}
-                          className="px-5 py-3 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs text-slate-700"
+                          className="rounded-xl border border-slate-200 bg-white px-4 text-xs hover:bg-slate-50"
                         >
                           Cancel
                         </button>
-
                       </div>
-
                     </div>
-
                   ) : (
-
-                    <div>
-
-                      <button
-                        onClick={() => {
-                          setSubmissionTaskId(
-                            task._id
-                          );
-
-                          setSubmissionContent(
-                            ""
-                          );
-
-                          setSubmissionUrl(
-                            ""
-                          );
-                        }}
-                        className="w-full bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shadow-lg shadow-sky-600/10"
-                      >
-
-                        <Upload size={15} />
-
-                        Add Completed Work & Drive Link
-
-                      </button>
-
-                      <p className="text-center text-[9px] text-slate-400 mt-2">
-                        Submit your completed work for administrator review.
-                      </p>
-
-                    </div>
+                    <button
+                      onClick={() => setCommentTaskId(task._id)}
+                      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold transition hover:border-sky-200 hover:text-sky-600"
+                    >
+                      <MessageSquare size={14} /> Add Comment
+                    </button>
                   )}
+                </div>
 
+                <div className="mt-3 flex flex-col justify-between gap-1 text-[9px] text-slate-400 sm:flex-row">
+                  <p>Last Updated: {formatDate(task.updatedAt)}</p>
+                  <p className="break-all text-slate-300">Task ID: {task._id}</p>
                 </div>
 
               </div>
-
-            </div>
-
-            {/* COMMENTS */}
-
-            <div className="border-t border-slate-100 bg-slate-50/70 p-5">
-
-              <div className="flex items-center justify-between mb-4">
-
-                <div className="flex items-center gap-2">
-
-                  <MessageSquare
-                    size={15}
-                    className="text-sky-600"
-                  />
-
-                  <h4 className="font-bold text-xs">
-                    Comments
-                  </h4>
-
-                </div>
-
-                {task.comments?.length > 0 && (
-                  <span className="text-[9px] bg-white border border-slate-200 px-2 py-1 rounded-full">
-                    {task.comments.length} comments
-                  </span>
-                )}
-
-              </div>
-
-              {task.comments?.length > 0 && (
-                <div className="space-y-2 mb-4">
-
-                  {task.comments.map(
-                    (comment, index) => (
-                      <div
-                        key={
-                          comment?._id ||
-                          index
-                        }
-                        className="bg-white border border-slate-200 rounded-xl p-3"
-                      >
-
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-
-                          <strong className="text-xs text-slate-800">
-                            {comment?.userName ||
-                              "User"}
-                          </strong>
-
-                          <span className="text-[9px] text-slate-400">
-                            {formatDate(
-                              comment?.createdAt
-                            )}
-                          </span>
-
-                        </div>
-
-                        <p className="text-xs text-slate-600 mt-2 whitespace-pre-wrap">
-                          {comment?.comment ||
-                            ""}
-                        </p>
-
-                      </div>
-                    )
-                  )}
-
-                </div>
-              )}
-
-              {commentTaskId === task._id ? (
-
-                <div className="space-y-2">
-
-                  <textarea
-                    value={commentText}
-                    onChange={(e) =>
-                      setCommentText(
-                        e.target.value
-                      )
-                    }
-                    placeholder="Enter your comment..."
-                    rows={3}
-                    className="w-full border border-slate-200 bg-white rounded-xl p-3 text-xs outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                  />
-
-                  <div className="flex gap-2">
-
-                    <button
-                      onClick={() =>
-                        addComment(
-                          task._id
-                        )
-                      }
-                      disabled={
-                        commentingTaskId ===
-                        task._id
-                      }
-                      className="flex-1 bg-slate-950 hover:bg-slate-800 disabled:opacity-50 text-white py-2.5 rounded-xl text-xs transition"
-                    >
-
-                      {commentingTaskId ===
-                      task._id ? (
-                        "Adding..."
-                      ) : (
-                        <>
-                          <Send
-                            size={14}
-                            className="inline mr-2"
-                          />
-                          Add Comment
-                        </>
-                      )}
-
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setCommentTaskId(null);
-                        setCommentText("");
-                      }}
-                      className="px-4 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs"
-                    >
-                      Cancel
-                    </button>
-
-                  </div>
-
-                </div>
-
-              ) : (
-
-                <button
-                  onClick={() =>
-                    setCommentTaskId(
-                      task._id
-                    )
-                  }
-                  className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:border-sky-200 hover:text-sky-600 rounded-xl text-xs font-semibold transition"
-                >
-
-                  <MessageSquare size={14} />
-
-                  Add Comment
-
-                </button>
-
-              )}
-
-            </div>
-
-            <div className="px-5 py-3 border-t border-slate-100 flex flex-col sm:flex-row sm:justify-between gap-1">
-
-              <p className="text-[9px] text-slate-400">
-                Last Updated:{" "}
-                {formatDate(
-                  task.updatedAt
-                )}
-              </p>
-
-              <p className="text-[9px] text-slate-300 break-all">
-                Task ID:{" "}
-                {task._id}
-              </p>
-
-            </div>
-
+            )}
           </div>
         );
       })}
-
     </div>
   );
 }
@@ -3238,20 +3026,56 @@ function InfoCard({
 function ProfileRow({
   label,
   value,
+  icon,
+  mono,
 }) {
   return (
-    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
 
-      <p className="text-[9px] uppercase text-slate-400 font-semibold">
+      <p className="flex items-center gap-1.5 text-[9px] font-semibold uppercase text-slate-400">
+        {icon}
         {label}
       </p>
 
-      <p className="text-sm font-semibold text-slate-800 mt-1 break-all">
+      <p className={`mt-1.5 text-sm font-semibold text-slate-800 break-all ${mono ? "font-mono text-xs" : ""}`}>
         {String(value ?? "")}
       </p>
 
     </div>
   );
+}
+
+// ===========================================================
+// STAT PILL  (Profile tab work statistics)
+// ===========================================================
+
+function StatPill({ icon, label, value, tone = "slate" }) {
+  const TONES = {
+    slate: "bg-slate-50 text-slate-600 border-slate-200",
+    emerald: "bg-emerald-50 text-emerald-600 border-emerald-200",
+    sky: "bg-sky-50 text-sky-600 border-sky-200",
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${TONES[tone] || TONES.slate}`}>
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="text-2xl font-black">{value}</span>
+      </div>
+      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</p>
+    </div>
+  );
+}
+
+// ===========================================================
+// DATE OF BIRTH  ("YYYY-MM-DD" -> "17 June 1995", no timezone shift)
+// ===========================================================
+
+function fmtDob(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
+  if (!m) return "Not set";
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const [, y, mo, d] = m;
+  return `${Number(d)} ${MONTHS[Number(mo) - 1] || ""} ${y}`;
 }
 
 // ===========================================================

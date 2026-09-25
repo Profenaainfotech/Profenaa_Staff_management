@@ -39,10 +39,22 @@ const settingSchema = new mongoose.Schema(
     extraOfficeIps: { type: [String], default: [] },
 
     // "Are you still working?" after shift end
-    overtimePromptMinutes: { type: Number, default: 10 }, // time allowed to reply
+    overtimePromptMinutes: { type: Number, default: 10 }, // time allowed to reply, first ask
+    overtimeRepeatMinutes: { type: Number, default: 5 }, // if still no reply, ask again this often
+    overtimeMaxAsks: { type: Number, default: 3 }, // give up (and act on noResponseAction) after this many unanswered asks
     overtimeRecheckMinutes: { type: Number, default: 60 }, // asked again this often during overtime
-    // No reply: HALF_DAY = half day until explained + approved, FLAG_ONLY = just flag it
-    noResponseAction: { type: String, enum: ["HALF_DAY", "FLAG_ONLY"], default: "HALF_DAY" },
+    // No reply after every repeat ask is exhausted:
+    //   HALF_DAY    = half day until explained + approved (attendance session ends)
+    //   FLAG_ONLY   = just flag it, no half-day penalty (attendance session ends)
+    //   AUTO_LOGOUT = the above, AND the staff member's CRM session is signed out
+    noResponseAction: { type: String, enum: ["HALF_DAY", "FLAG_ONLY", "AUTO_LOGOUT"], default: "HALF_DAY" },
+
+    // The alert sound played when "Are you still working?" appears (synthesised in the
+    // browser - no audio files to host). One of these presets, and it repeats on every
+    // repeat-ask, not just the first. mandatorySound cannot be muted by the browser tab
+    // alone; the tab must be actively closed/backgrounded to stop it.
+    overtimeSound: { type: String, enum: ["ALARM", "URGENT_BEEPS", "SIREN"], default: "ALARM" },
+    overtimeSoundSeconds: { type: Number, default: 5 }, // how long the alert sound plays each time
 
     // Reminder to submit the Daily Report this long after shift end (0 = off)
     dailyReportReminderMinutes: { type: Number, default: 15 },

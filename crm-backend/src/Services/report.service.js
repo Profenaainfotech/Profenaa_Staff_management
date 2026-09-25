@@ -314,6 +314,13 @@ async function userLive(userId) {
     serverTime: now.toISOString(),
     mode: user.attendanceMode || "CRM_LOGIN",
     notice,
+    // The browser is polling this with a token that was valid when the page loaded. If the
+    // account has since been signed out server-side (no reply at shift end and
+    // noResponseAction is AUTO_LOGOUT, or an admin deactivated them), isOnline is now
+    // false - the one and only signal the page needs to clear its own session and redirect
+    // to the login page. A fresh login always sets isOnline back to true first, so this
+    // never fires for someone who has since logged back in.
+    forceLogout: user.isOnline === false,
     branch: branch ? { id: branch._id, name: branch.name } : null,
     shift: ctx.shiftStart ? { start: ctx.shiftStart, end: ctx.shiftEnd } : null,
     device: device

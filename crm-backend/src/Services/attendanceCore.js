@@ -395,6 +395,7 @@ function askOvertime(att, ctx, nowMs, coveredUntil, out) {
   const windowMs = (Number(ctx.settings?.overtimePromptMinutes) || 10) * 60000;
   o.state = "ASKING";
   o.askId = (Number(o.askId) || 0) + 1;
+  o.unansweredCount = 1; // fresh round: this is the first of possibly several unanswered asks
   o.askedAt = new Date(nowMs);
   o.deadline = new Date(nowMs + windowMs);
   o.coveredUntil = new Date(coveredUntil);
@@ -416,6 +417,13 @@ function maybeAskOvertime(att, ctx, nowMs, out) {
   }
 }
 
+/**
+ * The employee has not answered by the deadline. If we have not asked the maximum
+ * number of times yet (overtimeMaxAsks, default 3), ask again - the same "are you still
+ * working?" question, with its own fresh window (overtimeRepeatMinutes, default 5) - so
+ * a missed pop-up gets more than one chance to be seen. Only once every repeat is
+ * exhausted does the session actually end.
+ */
 function resolveOvertimeDeadline(att, ctx, nowMs, out) {
   const o = att.overtime;
   if (!o || o.state !== "ASKING" || nowMs <= ms(o.deadline)) return;
@@ -426,6 +434,19 @@ function resolveOvertimeDeadline(att, ctx, nowMs, out) {
   }
   const alive = att.wifi.state === "CONNECTED" && nowMs - ms(att.wifi.lastHeartbeatAt) <= twoHbMs(ctx);
   if (!alive) return; // silent device: the normal offline handling ends the session, no penalty
+
+  const maxAsks = Math.max(1, Number(ctx.settings?.overtimeMaxAsks) || 3);
+  if ((o.unansweredCount || 1) < maxAsks) {
+    const repeatMs = (Number(ctx.settings?.overtimeRepeatMinutes) || 5) * 60000;
+    o.askId = (Number(o.askId) || 0) + 1;
+    o.unansweredCount = (o.unansweredCount || 1) + 1;
+    o.askedAt = new Date(nowMs);
+    o.deadline = new Date(nowMs + repeatMs);
+    // o.coveredUntil is left as-is: it still anchors where the session closes to if nobody ever answers
+    out.events.push(ev("OVERTIME_ASKED_AGAIN", { t: nowMs }, "Still no reply - asked again", { askId: o.askId, unansweredCount: o.unansweredCount }));
+    out.notes.push({ type: "OVERTIME_ASK", askId: o.askId, deadline: o.deadline, repeat: true, unansweredCount: o.unansweredCount });
+    return;
+  }
 
   const end = Math.min(ms(o.coveredUntil), ms(s.lastPresentAt) || ms(s.checkIn));
   closeOpenSession(att, end, "NO_RESPONSE", nowMs);
@@ -447,6 +468,7 @@ function resolveOvertimeDeadline(att, ctx, nowMs, out) {
   out.events.push(ev("OVERTIME_NO_RESPONSE", { t: nowMs }, "No reply to \"Are you still working?\" - session ended at shift end"));
   out.notes.push({ type: "SESSION_ENDED", reason: "NO_RESPONSE" });
   if (penalise) out.notes.push({ type: "NO_RESPONSE" });
+  if (ctx.settings?.noResponseAction === "AUTO_LOGOUT") out.notes.push({ type: "FORCE_LOGOUT" });
 }
 
 /** The employee's answer ("YES" | "NO"), from the Windows dialog or the web page. */

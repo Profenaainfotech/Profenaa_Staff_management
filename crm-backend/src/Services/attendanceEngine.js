@@ -201,14 +201,18 @@ async function dispatchNotes(att, user, branch, ctx, notes) {
       }
 
       if (n.type === "OVERTIME_ASK") {
-        const mins = Number(ctx.settings?.overtimePromptMinutes) || 10;
+        const maxAsks = Math.max(1, Number(ctx.settings?.overtimeMaxAsks) || 3);
+        const mins = n.repeat ? Number(ctx.settings?.overtimeRepeatMinutes) || 5 : Number(ctx.settings?.overtimePromptMinutes) || 10;
         await notify.notifyUser(user._id, {
           category: "attendance",
           type: "OVERTIME_ASK",
-          severity: "warning",
-          title: "Your shift has ended - are you still working?",
-          message: `Answer within ${mins} minutes on the pop-up on your PC or on the Attendance page. Yes = overtime, No = finish for the day. No reply ends your attendance at ${ctx.shiftEnd} and marks a half day until you explain.`,
+          severity: n.repeat ? "critical" : "warning",
+          title: n.repeat ? `Still there? (ask ${n.unansweredCount} of ${maxAsks})` : "Your shift has ended - are you still working?",
+          message: n.repeat
+            ? `You have not answered yet. Answer within ${mins} minutes or you will be asked again. After ${maxAsks} unanswered asks your attendance ends at ${ctx.shiftEnd}${ctx.settings?.noResponseAction === "AUTO_LOGOUT" ? " and you will be signed out." : "."}`
+            : `Answer within ${mins} minutes on the pop-up on your PC or on the Attendance page. Yes = overtime, No = finish for the day. No reply ends your attendance at ${ctx.shiftEnd} and marks a half day until you explain.`,
           link: "Attendance",
+          data: { sound: true },
           dedupeKey: `ot-ask:${user._id}:${day}:${n.askId}`,
         });
       }
@@ -244,6 +248,31 @@ async function dispatchNotes(att, user, branch, ctx, notes) {
           link: "AdminAttendance",
           data: { userId: String(user._id), date: day },
           dedupeKey: `ot-none-admin:${user._id}:${day}`,
+        });
+      }
+
+      if (n.type === "FORCE_LOGOUT") {
+        user.isOnline = false;
+        user.logoutTime = new Date();
+        await user.save();
+        await notify.notifyUser(user._id, {
+          category: "attendance",
+          type: "FORCE_LOGOUT",
+          severity: "critical",
+          title: "Signed out - no reply at shift end",
+          message: "You were signed out because \"Are you still working?\" went unanswered. Sign in again, and open Attendance to explain what happened.",
+          link: "Attendance",
+          dedupeKey: `ot-logout:${user._id}:${day}`,
+        });
+        await notify.notifyAdmins({
+          category: "attendance",
+          type: "FORCE_LOGOUT",
+          severity: "warning",
+          title: `${user.name} was signed out automatically`,
+          message: `No reply to the shift-end question after every repeat ask. Signed out and the day is a half day until they explain (Attendance > Corrections).`,
+          link: "AdminAttendance",
+          data: { userId: String(user._id), date: day },
+          dedupeKey: `ot-logout-admin:${user._id}:${day}`,
         });
       }
 
