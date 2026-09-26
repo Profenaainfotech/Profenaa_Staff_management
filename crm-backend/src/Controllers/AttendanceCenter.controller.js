@@ -197,6 +197,19 @@ const adminExtra = handle(async (req, res) => {
   ok(res, await report.extraWork({ from, to, branchId }));
 });
 
+// POST /api/attendance/admin/run-check-now
+//
+// The shift-end question, the day-off question, and the absolute safety cap all run on a
+// timer in the background (attendanceMonitor.js). This runs that exact same check once,
+// immediately, instead of waiting - so a stale session someone forgot to close gets
+// cleaned up right away, and this is also the "test it without waiting for shift end"
+// button: run it, then look at Users & Team / an individual's Attendance page for the
+// result.
+const adminRunCheckNow = handle(async (req, res) => {
+  const result = await engine.runMonitorTick(new Date());
+  ok(res, { message: `Checked ${result.checked} open session${result.checked === 1 ? "" : "s"}.`, ...result });
+});
+
 const exists = async (id) => Boolean(await User.exists({ _id: id }));
 
 module.exports = {
@@ -217,6 +230,7 @@ module.exports = {
   adminDecideReview,
   adminLogins,
   adminExtra,
+  adminRunCheckNow,
   exists,
   monthRange,
 };

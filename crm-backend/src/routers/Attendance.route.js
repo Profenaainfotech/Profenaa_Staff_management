@@ -39,7 +39,6 @@ attendancerouter.get("/my/live", requireAuth, center.myLive);
 attendancerouter.get("/my/month", requireAuth, center.myMonth);
 attendancerouter.get("/my/events", requireAuth, center.myEvents);
 attendancerouter.post("/my/overtime", requireAuth, center.myOvertimeAnswer);
-attendancerouter.post("/my/offday", requireAuth, center.myOffDayAnswer);
 attendancerouter.post("/my/explain", requireAuth, center.myExplain);
 attendancerouter.get("/my/logins", requireAuth, center.myLogins);
 attendancerouter.get("/my/reviews", requireAuth, center.myReviews);
@@ -55,5 +54,6 @@ attendancerouter.get("/admin/reviews", anyAuth.adminOnly, center.adminReviews);
 attendancerouter.patch("/admin/review", anyAuth.adminOnly, center.adminDecideReview);
 attendancerouter.get("/admin/logins", anyAuth.adminOnly, center.adminLogins);
 attendancerouter.get("/admin/extra", anyAuth.adminOnly, center.adminExtra);
+attendancerouter.post("/admin/run-check-now", anyAuth.adminOnly, center.adminRunCheckNow);
 
 module.exports = attendancerouter;

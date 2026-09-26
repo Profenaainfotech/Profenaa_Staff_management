@@ -90,6 +90,7 @@ import {
 ========================================================= */
 
 const USER_API_URL = `${API_ORIGIN}/api/UserAccounts`;
+const ATTENDANCE_API_URL = `${API_ORIGIN}/api/attendance`;
 
 const TASK_API_URL = `${API_ORIGIN}/api/Task`;
 
@@ -1629,6 +1630,29 @@ export default function AdminDashboard() {
         fetchSubmissions(),
       ]);
     };
+
+  // Runs the same "still working?" / "working today?" / stale-session check that
+  // normally happens on a background timer, right now instead of waiting - cleans up
+  // anyone stuck online for far too long, and doubles as a way to test the feature
+  // without waiting for a real shift end or Sunday.
+  const [checkingNow, setCheckingNow] = useState(false);
+  const runAttendanceCheckNow = async () => {
+    setCheckingNow(true);
+    try {
+      const res = await fetch(`${ATTENDANCE_API_URL}/admin/run-check-now`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || "Check failed");
+      alert(data?.message || `Checked ${data?.checked ?? 0} open session(s).`);
+      await fetchUsers(false);
+    } catch (err) {
+      alert(err.message || "Check failed");
+    } finally {
+      setCheckingNow(false);
+    }
+  };
 
   /* =====================================================
      CREATE USER
@@ -4243,6 +4267,16 @@ export default function AdminDashboard() {
 
                 Refresh
 
+              </button>
+
+              <button
+                onClick={runAttendanceCheckNow}
+                disabled={checkingNow}
+                title="Run the shift-end / day-off / stale-session check right now, instead of waiting for it to happen on its own"
+                className="hidden sm:flex items-center gap-2 px-3 py-2.5 bg-white border border-blue-100 rounded-xl text-xs font-semibold hover:bg-sky-50 transition disabled:opacity-50"
+              >
+                <Clock size={15} className={checkingNow ? "animate-spin" : ""} />
+                {checkingNow ? "Checking..." : "Check Attendance Now"}
               </button>
 
               {/* ALARM */}
