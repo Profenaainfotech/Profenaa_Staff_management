@@ -23,6 +23,12 @@ const {
 } = require("../Utils/time");
 const { normalizeIp } = require("../Utils/network");
 
+// CRM_LOGIN mode has no Wi-Fi heartbeat: "are they still around" instead comes from how
+// recently their tab last pinged (see pingActive in UserDashboard.jsx). It pings every
+// minute, so 3 minutes of silence is a comfortably safe margin before treating the tab
+// as gone.
+const CRM_ALIVE_WINDOW_MS = 3 * 60 * 1000;
+
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 const MAX_STALE_MS = 48 * 60 * 60 * 1000;
 
@@ -586,7 +592,14 @@ async function ingestBatch({ device, events, ip = "" }) {
 // ----------------------------------------------------
 async function tickOne(attId, now, cache) {
   const att = await Attendance.findById(attId);
-  if (!att || !["CONNECTED", "WARNING"].includes(att.wifi?.state)) return null;
+  if (!att) return null;
+
+  // CRM_LOGIN mode has no Wi-Fi heartbeat at all - "still open" just means checked in,
+  // not yet checked out. Everything else below (backfilling a session, deciding whether
+  // they are still around) is specific to that mode; a WIFI-mode record is completely
+  // unaffected by any of it.
+  const isCrmOpen = att.attendanceSource === "CRM_LOGIN" && att.checkIn && !att.checkOut;
+  if (!isCrmOpen && !["CONNECTED", "WARNING"].includes(att.wifi?.state)) return null;
 
   let user = cache.users.get(String(att.userId));
   if (!user) {
@@ -603,7 +616,32 @@ async function tickOne(attId, now, cache) {
 
   const ctx = buildCtx(user, branch, cache.settings);
   ctx.offDay = await offDayFor(cache.settings, att.branchId, att.date);
+
+  if (isCrmOpen) {
+    // Adopt the flat checkIn/checkOut into the same sessions[] shape a Wi-Fi day
+    // already uses, the FIRST time the engine ever sees this day - from then on every
+    // existing, already-tested piece (the cap, the overtime question, the day-off
+    // question) runs completely unchanged, exactly as it does for Wi-Fi.
+    if (!att.sessions?.length) att.sessions = [{ checkIn: att.checkIn, checkOut: null }];
+    // No heartbeat ever touches lastPresentAt for this mode, so do it here on every
+    // tick instead - otherwise the live running total reads as 0 the entire time the
+    // session stays open (totalMinutesOf falls back to checkIn itself with nothing else
+    // to go on), even though the person is clearly still working.
+    att.sessions[0].lastPresentAt = now;
+    // No heartbeat to check - "are they still around" is instead "did their tab ping
+    // recently" (see pingActive in UserDashboard.jsx / updateLastActive on the backend).
+    const lastActive = user.lastActivity ? new Date(user.lastActivity).getTime() : 0;
+    ctx.crmAlive = Date.now() - lastActive < CRM_ALIVE_WINDOW_MS;
+  }
+
   const out = core.applyMonitorTick(att, ctx, now);
+
+  if (isCrmOpen && att.sessions?.[0]?.checkOut && !att.checkOut) {
+    // Keep the flat field in step with the session it came from, so the ordinary CRM
+    // logout handler (which still checks "is checkOut already set?") sees this day as
+    // already closed and does not also try to close it a second time.
+    att.checkOut = att.sessions[0].checkOut;
+  }
 
   if (out.events.length || out.notes.length || out.repaired) {
     core.recompute(att, ctx);
@@ -611,6 +649,12 @@ async function tickOne(attId, now, cache) {
     await persistEvents(att, user, att.deviceId, out.events);
     await dispatchNotes(att, user, branch || { name: "the office" }, ctx, out.notes);
     notify.pushAttendanceUpdate(user._id, { date: att.date, state: att.wifi.state });
+  } else if (isCrmOpen) {
+    // Nothing asked/closed this tick, but lastPresentAt (and possibly the sessions[]
+    // backfill) still changed above and needs to be saved either way, so the live
+    // running total stays accurate between now and the next tick.
+    core.recompute(att, ctx);
+    await att.save();
   }
 
   return { att, user, ctx, branchId: att.branchId ? String(att.branchId) : null };
@@ -619,7 +663,9 @@ async function tickOne(attId, now, cache) {
 async function runMonitorTick(now = new Date()) {
   const settings = await getSettings();
   const cache = { users: new Map(), branches: new Map(), settings };
-  const open = await Attendance.find({ "wifi.state": { $in: ["CONNECTED", "WARNING"] } }).select("_id userId");
+  const open = await Attendance.find({
+    $or: [{ "wifi.state": { $in: ["CONNECTED", "WARNING"] } }, { attendanceSource: "CRM_LOGIN", checkIn: { $ne: null }, checkOut: null }],
+  }).select("_id userId");
 
   const snapshots = [];
   for (const d of open) {

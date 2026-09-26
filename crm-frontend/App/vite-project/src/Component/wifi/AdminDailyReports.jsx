@@ -7,7 +7,7 @@ import { useAsync, useLiveRefresh } from "../../lib/hooks";
 import { downloadCsv, fmtDay, fmtMinutes, fmtTime, istDateKey } from "../../lib/format";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Stat, Table, Tabs, TextArea, TextInput, Themed, useApi, useToast } from "./ui";
 import { TechWorkView, pctText, pctTone } from "./TechWorkCard";
-import TechTasksAdmin from "./TechTaskAdmin";
+import TechTasksAdmin from "./TechTasksAdmin";
 
 const STATUS_TONE = { Completed: "green", "In Progress": "blue", Blocked: "red" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

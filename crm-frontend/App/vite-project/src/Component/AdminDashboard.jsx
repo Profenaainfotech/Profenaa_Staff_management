@@ -2420,6 +2420,20 @@ export default function AdminDashboard() {
     (user) => {
       if (!user) return 0;
 
+      // "Working Time" here must mean "worked TODAY", not an all-time running total.
+      // workedMinutes comes straight from today's actual attendance record (the same
+      // calculation the Staff Directory and the employee's own Attendance page use) -
+      // prefer it whenever the server has provided it.
+      if (
+        user.workedMinutes !== undefined &&
+        user.workedMinutes !== null &&
+        !Number.isNaN(Number(user.workedMinutes))
+      ) {
+        return Number(user.workedMinutes) * 60 * 1000;
+      }
+
+      // Fallback for any older response shape that does not carry workedMinutes yet -
+      // this is the same calculation as before, kept only so nothing breaks outright.
       const savedMinutes =
         Number(
           user.totalWorkingMinutes

@@ -406,7 +406,10 @@ function applyMonitorTick(att, ctx, now) {
 
   resolveOvertimeDeadline(att, ctx, n, out);
   resolveOffDayDeadline(att, ctx, n, out);
-  if (openSession(att)) maybeAskOvertime(att, ctx, n, out);
+  if (openSession(att)) {
+    maybeAskOffDay(att, ctx, n, out);
+    maybeAskOvertime(att, ctx, n, out);
+  }
   return out;
 }
 
@@ -437,7 +440,7 @@ function askOvertime(att, ctx, nowMs, coveredUntil, out) {
 
 function maybeAskOvertime(att, ctx, nowMs, out) {
   const s = openSession(att);
-  if (!s || att.wifi.state !== "CONNECTED" || !isDayShift(ctx)) return;
+  if (!s || (att.wifi.state !== "CONNECTED" && !ctx.crmAlive) || !isDayShift(ctx)) return;
   ensureExtras(att);
   const o = att.overtime;
   const endMs = shiftEndAt(att, ctx);
@@ -446,6 +449,19 @@ function maybeAskOvertime(att, ctx, nowMs, out) {
   } else if (o.state === "CONFIRMED" && o.nextAskAt && nowMs >= ms(o.nextAskAt)) {
     askOvertime(att, ctx, nowMs, ms(o.nextAskAt), out);
   }
+}
+
+/**
+ * Same trigger as askOffDay's call from applySignal (the first check-in of the day, on a
+ * day off) - but reachable from the periodic monitor tick too. For WIFI mode this never
+ * does anything new (applySignal already asked by the time a tick runs), but it is what
+ * actually asks a CRM_LOGIN person, since nothing calls applySignal for them at all.
+ */
+function maybeAskOffDay(att, ctx, nowMs, out) {
+  if (!ctx.offDay) return;
+  const s = openSession(att);
+  if (!s) return;
+  askOffDay(att, ctx, nowMs, out); // askOffDay is already idempotent (state !== "NONE" -> no-op)
 }
 
 /**
@@ -463,7 +479,7 @@ function resolveOvertimeDeadline(att, ctx, nowMs, out) {
     o.state = "NONE";
     return;
   }
-  const alive = att.wifi.state === "CONNECTED" && nowMs - ms(att.wifi.lastHeartbeatAt) <= twoHbMs(ctx);
+  const alive = (att.wifi.state === "CONNECTED" && nowMs - ms(att.wifi.lastHeartbeatAt) <= twoHbMs(ctx)) || ctx.crmAlive === true;
   if (!alive) return; // silent device: the normal offline handling ends the session, no penalty
 
   const maxAsks = Math.max(1, Number(ctx.settings?.overtimeMaxAsks) || 3);

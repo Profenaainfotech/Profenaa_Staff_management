@@ -571,4 +571,69 @@ scenario("logging out before any check-in still blocks a later automatic check-i
   assert.strictEqual(a.sessions.length, 0);
 });
 
+// =====================================================================
+// CRM_LOGIN MODE - no Wi-Fi heartbeat at all. Once the engine has adopted the flat
+// checkIn/checkOut into sessions[] (attendanceEngine.tickOne does this once, the first
+// time it sees the day), every one of these should work exactly like Wi-Fi mode -
+// "still around" is decided by ctx.crmAlive (a fresh activity ping) instead of a
+// heartbeat, and nothing here is reachable through applySignal at all, only through
+// applyMonitorTick.
+// =====================================================================
+
+/** A day already adopted into sessions[] (as tickOne would leave it), with no Wi-Fi at all. */
+const crmDay = (checkInHms) => ({ ...newDay(), sessions: [{ checkIn: D(checkInHms), checkOut: null }] });
+
+scenario("CRM_LOGIN: asked 'still working?' at shift end, same as Wi-Fi, using crmAlive instead of a heartbeat", () => {
+  const crm = { ...ctx, crmAlive: true };
+  const a = crmDay("09:30:00");
+  const r = core.applyMonitorTick(a, crm, D("18:30:05"));
+  assert.ok(types(r).includes("OVERTIME_ASKED"));
+  assert.strictEqual(a.overtime.state, "ASKING");
+});
+
+scenario("CRM_LOGIN: not asked while their tab has gone quiet (crmAlive false) - same restraint as a silent Wi-Fi device", () => {
+  const crm = { ...ctx, crmAlive: false };
+  const a = crmDay("09:30:00");
+  const r = core.applyMonitorTick(a, crm, D("18:30:05"));
+  assert.ok(!types(r).includes("OVERTIME_ASKED"));
+  assert.strictEqual(a.overtime?.state ?? "NONE", "NONE");
+});
+
+scenario("CRM_LOGIN: repeat-asks and the absolute cap both work exactly like Wi-Fi mode", () => {
+  const crm = { ...ctx, crmAlive: true };
+  const a = crmDay("09:30:00");
+  core.applyMonitorTick(a, crm, D("18:30:05")); // ask #1
+  const deadline1 = new Date(a.overtime.deadline).getTime();
+  const r2 = core.applyMonitorTick(a, crm, new Date(deadline1 + 10 * 60000)); // no reply -> repeat ask #2
+  assert.ok(types(r2).includes("OVERTIME_ASKED_AGAIN"));
+  // never responds at all, all the way out to the absolute cap - it still closes, same as Wi-Fi
+  const r3 = core.applyMonitorTick(a, crm, new Date(T("09:30:00") + 16 * 3600 * 1000 + 5000));
+  assert.deepStrictEqual(types(r3), ["AUTO_CHECK_OUT"]);
+  assert.notStrictEqual(a.sessions[0].checkOut, null);
+});
+
+scenario("CRM_LOGIN: 'are you working today?' fires from the monitor tick (there is no check-in signal to hook for this mode)", () => {
+  const off = { ...ctx, offDay: { type: "WEEKLY_OFF" }, crmAlive: true };
+  const a = crmDay("11:00:00");
+  assert.strictEqual(a.offDayAsk?.state ?? "NONE", "NONE"); // nothing has asked yet - unlike Wi-Fi, no applySignal ever ran
+  const r = core.applyMonitorTick(a, off, D("11:00:05"));
+  assert.ok(types(r).includes("OFFDAY_ASKED"));
+  assert.strictEqual(a.offDayAsk.state, "ASKING");
+  const ans = core.answerOffDay(a, off, "YES", T("11:02:00"));
+  assert.ok(ans.ok);
+  // the engine (attendanceEngine.tickOne) refreshes lastPresentAt on every tick for this
+  // mode, since no heartbeat ever does it the way Wi-Fi mode's does - simulated here
+  a.sessions[0].lastPresentAt = D("13:00:00");
+  core.applyMonitorTick(a, off, D("13:00:00"));
+  core.recompute(a, off);
+  assert.ok(a.offDayMinutes > 0); // counted separately, exactly like a Wi-Fi day-off confirmation
+});
+
+scenario("CRM_LOGIN: an ordinary Wi-Fi day is completely unaffected - crmAlive is simply absent from ctx", () => {
+  const a = newDay();
+  core.applySignal(a, ctx, hb("09:30:00"));
+  keepAlive(a, "09:31:30", "18:31:00");
+  assert.strictEqual(a.overtime.state, "ASKING"); // driven by the real Wi-Fi heartbeat, same as every test above this one
+});
+
 console.log(`\n${n} scenarios passed`);
