@@ -3,7 +3,7 @@
 //   OvertimeNote    overtime is being recorded / today is a day off
 //   ExplainCard     no reply at shift end -> the day is a half day until you explain and an admin approves
 import React, { useState } from "react";
-import { BadgeCheck, Clock3, Flame, MessageSquareWarning, Send, Sun, ThumbsDown, ThumbsUp } from "lucide-react";
+import { BadgeCheck, Clock3, Flame, LogOut, MessageSquareWarning, Send, Sun, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useAsync, useTick } from "../../lib/hooks";
 import { fmtDay, fmtMinutes, fmtTime } from "../../lib/format";
 import { Badge, Button, Card, Field, TextArea, useApi, useToast } from "./ui";
@@ -12,8 +12,26 @@ export function ShiftEndBanner({ prompt, fetchedAt, onChanged }) {
   const api = useApi();
   const toast = useToast();
   const [busy, setBusy] = useState("");
+  const [declined, setDeclined] = useState(false); // stays true after "No, finished" so the reminder does not just flash and vanish
   useTick(1000);
-  if (!prompt) return null;
+  if (!prompt) {
+    // The question is no longer open (already answered, or the window passed) - if the
+    // last thing that happened here was "No, finished", keep reminding them to actually
+    // log out: the system has already stopped counting their time, but their CRM session
+    // itself stays open until they close it themselves.
+    if (!declined) return null;
+    return (
+      <div role="alert" className="rounded-3xl border-2 border-sky-300 bg-gradient-to-br from-sky-50 to-blue-50 p-5 shadow-md">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center shrink-0"><LogOut size={22} /></div>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-black text-slate-900">Please log out now</p>
+            <p className="text-xs text-slate-600 mt-1">Your attendance already ended at shift end - nothing more is being counted. Log out of the CRM to finish your day.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const left = Math.max(0, Math.round((prompt.secondsLeft ?? 0) - (Date.now() - fetchedAt) / 1000));
   const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
@@ -23,6 +41,7 @@ export function ShiftEndBanner({ prompt, fetchedAt, onChanged }) {
     try {
       await api.post("/api/attendance/my/overtime", { answer: a });
       toast(a === "YES" ? "Thanks - your extra time is recorded as overtime" : "Thanks - your attendance ended at shift end");
+      if (a === "NO") setDeclined(true);
       onChanged?.();
     } catch (e) {
       toast(e.message, "error");
