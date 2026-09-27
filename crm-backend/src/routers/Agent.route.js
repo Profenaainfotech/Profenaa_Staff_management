@@ -9,5 +9,6 @@ r.post("/heartbeat", c.heartbeat);
 r.post("/shutdown", c.shutdown);
 r.post("/batch", c.batch);
 r.post("/overtime", c.overtime);
+r.post("/offday", c.offday);
 
 module.exports = r;

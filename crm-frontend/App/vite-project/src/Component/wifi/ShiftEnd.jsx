@@ -95,6 +95,88 @@ export function OvertimeNote({ live }) {
   );
 }
 
+// OffDayBanner - shown when the off-day YES/NO question is pending
+// Works for both WIFI and CRM_LOGIN modes (prompt.type === "OFFDAY")
+export function OffDayBanner({ prompt, fetchedAt, onChanged }) {
+  const api = useApi();
+  const toast = useToast();
+  const [busy, setBusy] = useState("");
+  const [answered, setAnswered] = useState(false);
+  useTick(1000);
+
+  if (!prompt || prompt.type !== "OFFDAY" || answered) return null;
+
+  const left = Math.max(0, Math.round((prompt.secondsLeft ?? 0) - (Date.now() - fetchedAt) / 1000));
+  const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  const dayLabel = prompt.dayType === "HOLIDAY" ? "holiday" : "Sunday / day off";
+
+  const answer = async (a) => {
+    setBusy(a);
+    try {
+      await api.post("/api/attendance/my/offday", { answer: a });
+      toast(
+        a === "YES"
+          ? "Confirmed — today's work is being recorded separately as day-off work."
+          : "Noted — nothing is counted today."
+      );
+      setAnswered(true);
+      onChanged?.();
+    } catch (e) {
+      toast(e.message, "error");
+      onChanged?.();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div role="alert" className="rounded-3xl border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-purple-50 p-5 shadow-md">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
+          <Sun size={24} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-black text-slate-900">
+            Today is a {dayLabel}. Are you working today?
+          </p>
+          <p className="text-xs text-slate-600 mt-1">
+            <b>Yes</b> = your hours today are counted separately as day-off work.{" "}
+            <b>No</b> = nothing is recorded today.
+            {left > 0
+              ? " If you do not answer, nothing is counted — same as any other day off."
+              : " The time to answer has passed."}
+          </p>
+        </div>
+        <div className="flex sm:flex-col items-center gap-2 shrink-0">
+          {left > 0 && (
+            <span className="rounded-full bg-white border border-violet-200 px-3 py-1 text-xs font-black text-violet-700 tabular-nums">
+              {mm} left
+            </span>
+          )}
+          <div className="flex gap-2">
+            <Button
+              variant="success"
+              onClick={() => answer("YES")}
+              loading={busy === "YES"}
+              disabled={left === 0 || Boolean(busy)}
+            >
+              <ThumbsUp size={14} /> Yes, working
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => answer("NO")}
+              loading={busy === "NO"}
+              disabled={left === 0 || Boolean(busy)}
+            >
+              <ThumbsDown size={14} /> No, day off
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const STATE = {
   PENDING_EXPLANATION: { label: "Explanation needed", tone: "red" },
   EXPLAINED: { label: "Waiting for admin", tone: "amber" },

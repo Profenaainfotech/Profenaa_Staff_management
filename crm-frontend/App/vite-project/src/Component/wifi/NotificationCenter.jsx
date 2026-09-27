@@ -143,6 +143,20 @@ function Bell({ onNavigate }) {
       seen.current?.add(n._id);
       playAlert(n.severity);
       toast(`${n.title}${n.message ? ` - ${n.message.split("\n")[0]}` : ""}`, n.severity === "critical" || n.severity === "warning" ? "error" : "success");
+      // Voice: speak for attendance alerts, test notifications, and critical/warning severity
+      if (!isMuted() && (n.category === "attendance" || n.severity === "critical" || n.severity === "warning" || n?.data?.voice || n?.data?.test)) {
+        const voiceMsg = n.data?.test
+          ? `${n.title}. ${n.message || ""}`
+          : n.category === "attendance"
+            ? `Attendance alert. ${n.title}.`
+            : `${n.title}.`;
+        if (window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(voiceMsg);
+          u.lang = "en-IN"; u.rate = 0.95; u.pitch = 1; u.volume = 1;
+          window.speechSynthesis.speak(u);
+        }
+      }
     });
     const poll = setInterval(load, 60000);
     return () => {

@@ -282,7 +282,7 @@ const createTechnologyProject = handle(async (req, res) => {
   const customWorkItems = customItems
     .map((c) => ({ title: clean(c?.title, 200), domain: clean(c?.domain, 60) }))
     .filter((c) => c.title && c.domain)
-    .map((c, i) => ({ id: `custom-${Date.now()}-${i}`, title: c.title, domain: c.domain }));
+    .map((c, i) => ({ itemId: 0, title: c.title, domain: c.domain }));
 
   const workItems = [...(catalogItems || []), ...customWorkItems];
   if (!workItems.length) throw httpError(400, "Tick at least one work item, or add a custom one.");

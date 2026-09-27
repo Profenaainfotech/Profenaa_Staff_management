@@ -390,12 +390,13 @@ export default function ProjectManagement() {
   const [loadingProjects, setLoadingProjects] =
     useState(false);
 
-  const [loadingUsers, setLoadingUsers] =
+  const [_loadingUsers, setLoadingUsers] =
     useState(false);
 
   const [typeTab, setTypeTab] = useState("Internal");
   const [formModal, setFormModal] = useState(null); // { mode: "create" | "edit", type?, project? }
   const [techModal, setTechModal] = useState(false); // the Technologies form (domains + work items)
+  const [techEditProject, setTechEditProject] = useState(null); // project being edited in the tech modal
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const errorTimer = useRef(null);
@@ -590,6 +591,11 @@ export default function ProjectManagement() {
 
   const openEditModal = (project) => {
     setShowDetailsModal(false);
+    if (project?.projectType === "Technologies") {
+      setTechEditProject(project);
+      setTechModal(true);
+      return;
+    }
     setFormModal({ mode: "edit", project });
   };
 
@@ -1050,21 +1056,6 @@ export default function ProjectManagement() {
   };
 
   /* =======================================================
-     REFRESH
-  ======================================================= */
-
-  const handleRefresh = async () => {
-    await Promise.all([
-      fetchProjects(),
-      fetchUsers(),
-    ]);
-
-    showSuccess(
-      "Project data refreshed."
-    );
-  };
-
-  /* =======================================================
      PROJECT STATUS  (read only - once assigned, the linked task
      is what gets worked on; see it and manage it from Tasks)
   ======================================================= */
@@ -1096,9 +1087,9 @@ export default function ProjectManagement() {
 
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-3">
 
-            <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-200">
+            <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-200 shrink-0">
               <FolderKanban
                 className="text-white"
                 size={25}
@@ -1107,7 +1098,7 @@ export default function ProjectManagement() {
 
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-2xl md:text-3xl font-black text-slate-800">
+                <h1 className="whitespace-nowrap text-2xl md:text-3xl font-black text-slate-800">
                   Project Management
                 </h1>
 
@@ -1125,36 +1116,14 @@ export default function ProjectManagement() {
 
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-nowrap items-center gap-2">
 
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={
-                loadingProjects ||
-                loadingUsers
-              }
-              className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-700 font-bold text-sm hover:bg-slate-100 transition disabled:opacity-50"
-            >
-              <RefreshCw
-                size={17}
-                className={
-                  loadingProjects
-                    ? "animate-spin"
-                    : ""
-                }
-              />
-
-              Refresh
-            </button>
-
-            
             <button
               type="button"
               onClick={() => openCreateModal("Internal")}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 shadow-lg shadow-blue-200 transition"
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700"
             >
-              <Plus size={18} />
+              <Plus size={17} />
 
               Internal Projects
             </button>
@@ -1162,9 +1131,9 @@ export default function ProjectManagement() {
             <button
               type="button"
               onClick={() => openCreateModal("External")}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-violet-600 text-white font-black text-sm hover:bg-violet-700 shadow-lg shadow-violet-200 transition"
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700"
             >
-              <Plus size={18} />
+              <Plus size={17} />
 
               External Projects
             </button>
@@ -1172,11 +1141,12 @@ export default function ProjectManagement() {
             <button
               type="button"
               onClick={() => openCreateModal("Technologies")}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-teal-600 text-white font-black text-sm hover:bg-teal-700 shadow-lg shadow-teal-200 transition"
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-teal-200 transition hover:bg-teal-700"
             >
-              <Plus size={18} />
+              <Plus size={17} />
 
-              Technologies
+              <span className="hidden 2xl:inline">Technologies / Institutions Projects</span>
+              <span className="2xl:hidden">Technologies/Inst</span>
             </button>
 
           </div>
@@ -1487,7 +1457,7 @@ export default function ProjectManagement() {
       =================================================== */}
 
       <div
-        className="mb-5 flex flex-wrap items-center gap-3"
+        className="mb-5 flex flex-wrap items-center gap-6 border-b border-slate-200"
         role="tablist"
         aria-label="Project type"
       >
@@ -1501,24 +1471,17 @@ export default function ProjectManagement() {
               role="tab"
               aria-selected={active}
               onClick={() => setTypeTab(t)}
-              className={`inline-flex items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-black transition ${
-                active
-                  ? t === "Internal"
-                    ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-                    : t === "External"
-                    ? "border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-600/20"
-                    : "border-teal-600 bg-teal-600 text-white shadow-lg shadow-teal-600/20"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+              className={`group relative flex items-center gap-1.5 whitespace-nowrap pb-3 text-sm font-bold transition-colors ${
+                active ? "text-slate-900" : "text-slate-400 hover:text-slate-700"
               }`}
             >
-              {t === "Technologies" ? t : `${t} Projects`}
+              {t === "Technologies" ? "Technologies / Institutions Projects" : `${t} Projects`}
+              <span className={`text-xs font-semibold ${active ? "text-slate-500" : "text-slate-300 group-hover:text-slate-400"}`}>{count}</span>
               <span
-                className={`rounded-full px-2 py-0.5 text-xs ${
-                  active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
+                className={`absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-slate-900 transition-all duration-200 ${
+                  active ? "opacity-100" : "scale-x-0 opacity-0 group-hover:scale-x-75 group-hover:opacity-30"
                 }`}
-              >
-                {count}
-              </span>
+              />
             </button>
           );
         })}
@@ -2247,16 +2210,14 @@ export default function ProjectManagement() {
 
                             View
                           </button>
-                            {typeOf(project) !== "Technologies" && (
-                              <button
-                                type="button"
-                                onClick={() => openEditModal(project)}
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                                aria-label={`Edit ${getProjectName(project)}`}
-                              >
-                                <Pencil size={15} />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(project)}
+                              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                              aria-label={`Edit ${getProjectName(project)}`}
+                            >
+                              <Pencil size={15} />
+                            </button>
                             <button
                               type="button"
                               onClick={() => askDelete(project)}
@@ -2313,8 +2274,9 @@ export default function ProjectManagement() {
       {techModal && (
         <TechnologyFormModal
           users={users}
-          onClose={() => setTechModal(false)}
+          onClose={() => { setTechModal(false); setTechEditProject(null); }}
           onSaved={handleProjectSaved}
+          editProject={techEditProject}
         />
       )}
 
@@ -2410,15 +2372,13 @@ export default function ProjectManagement() {
                 </div>
 
                 <div className="ml-auto mr-3 flex items-center gap-2">
-                  {typeOf(selectedProject) !== "Technologies" && (
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(selectedProject)}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                    >
-                      <Pencil size={15} /> Edit
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(selectedProject)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Pencil size={15} /> Edit
+                  </button>
                   <button
                     type="button"
                     onClick={() => askDelete(selectedProject)}

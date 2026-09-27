@@ -351,6 +351,7 @@ async function userLive(userId) {
           overtimeMinutes: att.overtimeMinutes,
           offDayMinutes: att.offDayMinutes || 0,
           dayType: att.dayType || "WORKING",
+          offDayAskState: att.offDayAsk?.state || "NONE",
           review: att.review && att.review.state && att.review.state !== "NONE" ? att.review : null,
           correctionReason: att.correctionReason,
           ssid: att.wifi?.ssid || "",

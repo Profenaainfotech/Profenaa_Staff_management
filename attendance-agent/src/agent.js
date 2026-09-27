@@ -12,6 +12,7 @@ const queue = require("./queue");
 const wifi = require("./wifi");
 const log = require("./log");
 const { toast } = require("./notify");
+const DAY_KEY = () => new Date(new Date().toLocaleString("en-CA", { timeZone: "Asia/Kolkata" })).toISOString().slice(0, 10);
 const prompt = require("./prompt");
 
 const VERSION = require("../package.json").version;
@@ -32,8 +33,10 @@ function createAgent() {
   let online = true;
   let lastTickAt = 0;
   const said = new Set(); // one-time notices
-  const asked = new Set(); // shift-end questions already shown (by id)
+  const asked    = new Set(); // shift-end questions already shown (by id)
+  const offAsked = new Set(); // off-day questions already shown (by day+askId)
   let promptOpen = false;
+  let lastDay = DAY_KEY(); // detect midnight rollover - each day's session is independent
 
   const offset = () => state.clockOffsetMs || 0;
   const nowIso = () => new Date(Date.now() + offset()).toISOString();
@@ -122,8 +125,8 @@ function createAgent() {
       } else if (next === "ENDED" && (prev === "CONNECTED" || prev === "WARNING")) {
         const m = s.workedMinutes || 0;
         const worked = `${Math.floor(m / 60)}h ${m % 60}m`;
-        if (s.signedOut) toast("Attendance stopped", `You logged out of the CRM. Worked today: ${worked}. Log in again to continue.`);
-        else if (s.overtimeState === "NO_RESPONSE") toast("No reply received", `Your attendance ended at shift end and the day is marked half day. Open Attendance in the CRM and explain. Worked: ${worked}.`);
+        if (s.signedOut) toast("Attendance stopped", `You logged out. Worked today: ${worked}.`);
+        else if (s.overtimeState === "NO_RESPONSE") toast("No reply - half day marked", `Your attendance ended at shift end. Open Attendance in the CRM and explain. Worked: ${worked}.`, { urgent: true });
         else if (s.overtimeState === "DECLINED") toast("Attendance finished", `Have a good evening. Worked today: ${worked}.`);
         else toast("Attendance paused", `Worked so far today: ${worked}.`);
       }
@@ -132,11 +135,11 @@ function createAgent() {
     }
   }
 
-  // ---------- "Are you still working?" ----------
-  async function sendAnswer(answer) {
+  // ---------- answer endpoints ----------
+  async function sendAnswer(answer, endpoint = "/api/agent/overtime") {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        return await api.request("POST", "/api/agent/overtime", { device: device.deviceToken, body: { answer } });
+        return await api.request("POST", endpoint, { device: device.deviceToken, body: { answer } });
       } catch (err) {
         if (!err.network || attempt === 3) throw err;
         await sleep(3000);
@@ -149,26 +152,71 @@ function createAgent() {
     if (promptOpen || asked.has(p.askId)) return;
     asked.add(p.askId);
     promptOpen = true;
+    // Urgent alarm toast so staff hear it even if they are away from the screen
+    toast(
+      "⏰ Shift ended — are you still working?",
+      `Your shift ended at ${p.shiftEnd || "shift end"}. Answer within ${Math.ceil((p.secondsLeft || 600) / 60)} min or the day is marked half day.`,
+      { urgent: true }
+    );
     try {
       log.info(`Shift-end question #${p.askId}: asking the employee (${p.secondsLeft}s to answer)`);
       const answer = await prompt.askStillWorking({ secondsLeft: p.secondsLeft, shiftEnd: p.shiftEnd });
       if (answer === "YES" || answer === "NO") {
-        const res = await sendAnswer(answer);
+        const res = await sendAnswer(answer, "/api/agent/overtime");
         if (res?.status === 200 && res.body.ok) {
           log.info(`Shift-end answer sent: ${answer}`);
-          if (answer === "YES") toast("Overtime is being recorded", "Time after your shift end is counted as overtime. You will be asked again in about an hour.");
-          else toast("Attendance finished", "Your attendance ended at shift end. Have a good evening.");
+          if (answer === "YES") toast("Overtime is being recorded", "Time after shift end is counted as overtime. You will be asked again in about an hour.");
+          else toast("Attendance finished", "Have a good evening. Your attendance ended at shift end.");
         } else {
-          toast("Answer not accepted", "The time to answer may have passed, or you already answered. Open Attendance in the CRM to check.");
+          toast("Answer not accepted", "The time may have passed. Open Attendance in the CRM to check.", { urgent: false });
         }
       } else if (answer === "UNAVAILABLE") {
-        toast("Shift ended - are you still working?", "Open Attendance in the CRM and answer Yes or No within a few minutes, otherwise your day is marked as a half day.");
+        toast("Shift ended — answer needed", "Open the Attendance tab in the CRM and click Yes or No now.", { urgent: true });
       } else if (answer === "TIMEOUT") {
         log.info("Shift-end question: no answer before the deadline");
+        toast("No answer — half day will be marked", "Open the Attendance tab in the CRM, explain what happened. Admin can then make the day Present.", { urgent: true });
       }
     } catch (err) {
       log.warn(`Could not send the shift-end answer: ${err.message}`);
-      toast("Could not send your answer", "Please open Attendance in the CRM and answer there.");
+      toast("Could not send your answer", "Please open Attendance in the CRM and answer there.", { urgent: true });
+    } finally {
+      promptOpen = false;
+    }
+  }
+
+  // ---------- "Today is a day off — are you working?" ----------
+  async function showOffDayQuestion(p) {
+    const key = `${p.askId}`;
+    if (promptOpen || offAsked.has(key)) return;
+    offAsked.add(key);
+    promptOpen = true;
+    const dayLabel = p.dayType === "HOLIDAY" ? "holiday" : "Sunday / day off";
+    toast(
+      `📅 Today is a ${dayLabel} — are you working?`,
+      `Answer within ${Math.ceil((p.secondsLeft || 600) / 60)} min. Yes = hours counted. No = nothing recorded.`,
+      { urgent: true }
+    );
+    try {
+      log.info(`Off-day question #${p.askId}: asking the employee (${p.secondsLeft}s to answer)`);
+      const answer = await prompt.askOffDay({ secondsLeft: p.secondsLeft, dayType: p.dayType });
+      if (answer === "YES" || answer === "NO") {
+        const res = await sendAnswer(answer, "/api/agent/offday");
+        if (res?.status === 200 && res.body.ok) {
+          log.info(`Off-day answer sent: ${answer}`);
+          if (answer === "YES") toast("Day-off work is being recorded", "Today's hours are counted separately as day-off work.");
+          else toast("Day off confirmed", "Nothing is recorded today. Enjoy your day off.");
+        } else {
+          toast("Answer not accepted", "The time may have passed. Open Attendance in the CRM to check.");
+        }
+      } else if (answer === "UNAVAILABLE") {
+        toast("Day off — answer needed in CRM", "Open the Attendance tab and click Yes or No.", { urgent: true });
+      } else if (answer === "TIMEOUT") {
+        log.info("Off-day question: no answer — nothing recorded");
+        toast("No answer — nothing counted", "You did not answer the day-off question. Nothing is recorded today — same as any other day off.");
+      }
+    } catch (err) {
+      log.warn(`Could not send the off-day answer: ${err.message}`);
+      toast("Could not send your answer", "Open Attendance in the CRM and answer there.", { urgent: true });
     } finally {
       promptOpen = false;
     }
@@ -177,9 +225,13 @@ function createAgent() {
   function handleQuestion(s) {
     if (!s) return;
     if (s.prompt && s.prompt.askId) {
-      showShiftEndQuestion(s.prompt); // not awaited: readings keep flowing while the dialog is open
+      if (s.prompt.type === "OFFDAY") {
+        showOffDayQuestion(s.prompt); // not awaited
+      } else {
+        showShiftEndQuestion(s.prompt); // not awaited
+      }
     } else if (promptOpen && s.prompt === null) {
-      prompt.cancel(); // answered on the web page (or the time ran out): close the dialog
+      prompt.cancel(); // answered on the web / CRM: close the dialog
     }
   }
 
@@ -243,7 +295,17 @@ function createAgent() {
       }
       lastTickAt = started;
 
-      const r = await wifi.current();
+      // Day rollover: reset per-day sets so tomorrow's prompts show fresh
+    const today = DAY_KEY();
+    if (today !== lastDay) {
+      lastDay = today;
+      asked.clear();
+      offAsked.clear();
+      said.clear();
+      log.info(`New day (${today}): daily tracking reset. Each day is recorded independently.`);
+    }
+
+    const r = await wifi.current();
       if (r.hidden) {
         once("hidden", () =>
           toast("Wi-Fi details hidden by Windows", "Turn on Settings > Privacy & security > Location so the agent can read the Wi-Fi name.")
@@ -274,7 +336,17 @@ function createAgent() {
     clearTimeout(timer);
     log.info(`Shutting down (${reason})`);
     try {
-      const r = await wifi.current();
+      // Day rollover: reset per-day sets so tomorrow's prompts show fresh
+    const today = DAY_KEY();
+    if (today !== lastDay) {
+      lastDay = today;
+      asked.clear();
+      offAsked.clear();
+      said.clear();
+      log.info(`New day (${today}): daily tracking reset. Each day is recorded independently.`);
+    }
+
+    const r = await wifi.current();
       queue.push({ kind: "SHUTDOWN", connected: r.connected, ssid: r.ssid, bssid: r.bssid, occurredAt: nowIso() });
       blockedUntil = 0;
       await Promise.race([flush(true), sleep(4000)]);

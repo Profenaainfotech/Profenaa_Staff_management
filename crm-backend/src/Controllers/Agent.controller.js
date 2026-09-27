@@ -44,6 +44,9 @@ const getConfig = handle(async (req, res) => {
     heartbeatInterval: branch?.heartbeatInterval || 90,
     gracePeriod: branch?.gracePeriod || 300,
     earliestCheckInBeforeShiftMinutes: settings.earliestCheckInBeforeShiftMinutes,
+    overtimeSound: settings.overtimeSound || "ALARM",
+    overtimeSoundSeconds: settings.overtimeSoundSeconds || 5,
+    offDayAskMinutes: settings.offDayAskMinutes || 10,
     serverTime: new Date().toISOString(),
   });
 });

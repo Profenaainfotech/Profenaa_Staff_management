@@ -5,7 +5,7 @@ import { useAsync, useLiveRefresh, useTick } from "../../lib/hooks";
 import { addDaysKey, fmtDay, fmtMinutes, fmtTime, hhmmIST, istDateKey, timeAgo } from "../../lib/format";
 import MonthCalendar from "./MonthCalendar";
 import { SignInList } from "./LoginActivity";
-import { ExplainCard, OvertimeNote, ShiftEndBanner } from "./ShiftEnd";
+import { ExplainCard, OffDayBanner, OvertimeNote, ShiftEndBanner } from "./ShiftEnd";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, Spinner, StatusBadge, Table, TextArea, TextInput, Themed, useApi, useConfirm, useToast } from "./ui";
 
 const HERO = {
@@ -250,6 +250,7 @@ function Body() {
     <div className="space-y-5">
       {confirm}
       <Hero live={data} fetchedAt={fetchedAt} />
+      <OffDayBanner prompt={data.live?.prompt} fetchedAt={fetchedAt} onChanged={() => { reloadAll({ silent: true }); setReviewKey((k) => k + 1); }} />
       <ShiftEndBanner prompt={data.live?.prompt} fetchedAt={fetchedAt} onChanged={() => { reloadAll({ silent: true }); setReviewKey((k) => k + 1); }} />
       <OvertimeNote live={data} />
       <ExplainCard refreshKey={reviewKey} onChanged={() => reloadAll({ silent: true })} />

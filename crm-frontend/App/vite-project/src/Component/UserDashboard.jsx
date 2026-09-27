@@ -36,6 +36,7 @@ import Attendance from "../Component/Attendance";
 
 // Wi-Fi attendance, leaves and live notifications
 import MyAttendance from "./wifi/MyAttendance";
+import { OffDayBanner } from "./wifi/ShiftEnd";
 import MyLeaves from "./wifi/MyLeaves";
 import NotificationCenter from "./wifi/NotificationCenter";
 import DailyReport from "./wifi/DailyReport";
@@ -76,6 +77,8 @@ export default function UserDashboard() {
   // =========================================================
 
   const [userData, setUserData] = useState(null);
+  const [offDayPrompt, setOffDayPrompt] = useState(null); // { type:"OFFDAY", secondsLeft, dayType } when Sunday/holiday ask is pending
+  const [offDayFetchedAt, setOffDayFetchedAt] = useState(Date.now());
 
   // Fields the login response doesn't include (date of birth, mode of learning, ...) -
   // fetched once from /get-profile and merged into userData for the Profile tab.
@@ -2117,6 +2120,16 @@ export default function UserDashboard() {
               */}
 
               <div className="w-full">
+
+                {offDayPrompt && (
+                  <div className="mb-4">
+                    <OffDayBanner
+                      prompt={offDayPrompt}
+                      fetchedAt={offDayFetchedAt}
+                      onChanged={() => setOffDayPrompt(null)}
+                    />
+                  </div>
+                )}
 
                 <MyAttendance
                   ClassicView={Attendance}

@@ -116,6 +116,7 @@ export const DOMAIN_STYLE = {
   Placement: "bg-indigo-50 text-indigo-700 border-indigo-200",
   HR: "bg-rose-50 text-rose-700 border-rose-200",
   "Social Media": "bg-cyan-50 text-cyan-700 border-cyan-200",
+  Branding: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
 };
 export const DOMAIN_SOLID = {
   Sales: "bg-orange-500 border-orange-500 text-white",
@@ -124,6 +125,7 @@ export const DOMAIN_SOLID = {
   Placement: "bg-indigo-500 border-indigo-500 text-white",
   HR: "bg-rose-500 border-rose-500 text-white",
   "Social Media": "bg-cyan-600 border-cyan-600 text-white",
+  Branding: "bg-fuchsia-500 border-fuchsia-500 text-white",
 };
 export const STATUS_STYLE = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",

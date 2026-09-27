@@ -1,8 +1,8 @@
 // Create / edit a project (admin).
 //
-// Fields, in this order:
-//   1 Project title *          2 Error / change required *      3 Description *
-//   4 Images (optional, up to 10)     5 Assign to (optional)      6 Validity time (optional)
+// Fields, in this order (nothing is mandatory - temporary, per request):
+//   1 Project title          2 Tasks/errors/changes required      3 Description
+//   4 Images (optional, up to 10)     5 Assign to (one or more, on create)      6 Validity time (optional)
 // ...then a Project Summary that shows exactly what will be created.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, Image as ImageIcon, Layers, Loader2, Plus, Save, Target, Trash2, Upload, UserRound, X } from "lucide-react";
@@ -59,8 +59,6 @@ function Step({ n, label, required, hint, error, children, htmlFor }) {
 
 export default function ProjectFormModal({ mode = "create", project = null, defaultType = "Internal", defaultAssignedTo = "", users = [], onClose, onSaved }) {
   const editing = mode === "edit";
-  // once somebody has started the project, who holds it can no longer be changed here
-  const assignmentLocked = editing && project?.status !== "Pending";
 
   const [type, setType] = useState(project?.projectType || defaultType);
   const [f, setF] = useState(() => ({
@@ -74,6 +72,13 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
   const [kept, setKept] = useState(() => (editing ? projectImages(project) : [])); // stored images still on the project
   const [removed, setRemoved] = useState([]);
   const [added, setAdded] = useState([]); // { file, url } waiting to be uploaded
+  // Creating: one project per selected staff member (or none, for the pool). Editing an
+  // existing project still only ever has the one owner - f.assignedTo above handles that.
+  const [createAssignees, setCreateAssignees] = useState(() => (defaultAssignedTo ? [String(defaultAssignedTo)] : []));
+  const toggleCreateAssignee = (id) => {
+    const key = String(id);
+    setCreateAssignees((c) => (c.includes(key) ? c.filter((x) => x !== key) : [...c, key]));
+  };
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -143,11 +148,10 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
 
   const validate = () => {
     const e = {};
+    // Mandatory fields temporarily switched off (Internal/External/Technologies, per
+    // request) - length/format checks only apply once something has actually been typed.
     const t = f.title.trim();
-    if (t.length < 3) e.title = "Project title is required (at least 3 characters).";
-    else if (t.length > 120) e.title = "Project title is too long (maximum 120 characters).";
-    if (f.issueDetails.trim().length < 5) e.issueDetails = "Describe the error or change that has to be made (at least 5 characters).";
-    if (f.description.trim().length < 10) e.description = "Project description is required (at least 10 characters).";
+    if (t && t.length > 120) e.title = "Project title is too long (maximum 120 characters).";
     if (f.validity === "custom") {
       const d = dueFrom(f.validity, f.customDue, project);
       if (!d) e.validity = 'Choose a date and time, or pick "No validity time".';
@@ -180,10 +184,10 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
       const dueDate = dueFrom(f.validity, f.customDue, project);
       fd.append("dueDate", dueDate ? dueDate.toISOString() : "");
       if (editing) {
-        if (!assignmentLocked) fd.append("assignedTo", f.assignedTo || "");
+        fd.append("assignedTo", f.assignedTo || "");
         fd.append("removeImages", JSON.stringify(removed));
-      } else if (f.assignedTo) {
-        fd.append("assignedTo", f.assignedTo);
+      } else {
+        createAssignees.forEach((id) => fd.append("assignedTo", id));
       }
       added.forEach(({ file }) => fd.append("images", file, file.name));
 
@@ -237,15 +241,15 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
             <p className="mt-1.5 text-xs text-slate-400">The card is stored only under {type} projects.</p>
           </div>
 
-          <Step n={1} label="Project Title" required htmlFor="pf-title" error={errors.title}>
+          <Step n={1} label="Project Title" htmlFor="pf-title" error={errors.title}>
             <input id="pf-title" ref={titleRef} value={f.title} onChange={set("title")} maxLength={120} placeholder="Enter project title" aria-invalid={Boolean(errors.title)} className={fieldCls(errors.title)} />
           </Step>
 
-          <Step n={2} label="Error / change required" required htmlFor="pf-issue" error={errors.issueDetails} hint="What exactly is wrong, or what must be changed? Staff read this first.">
+          <Step n={2} label="Tasks/errors/changes required" htmlFor="pf-issue" error={errors.issueDetails} hint="What exactly is wrong, or what must be changed? Staff read this first.">
             <textarea id="pf-issue" ref={issueRef} value={f.issueDetails} onChange={set("issueDetails")} rows={3} maxLength={1000} placeholder="e.g. The Submit button does nothing on Safari. Change the click handler so it also works on touch devices." aria-invalid={Boolean(errors.issueDetails)} className={fieldCls(errors.issueDetails)} />
           </Step>
 
-          <Step n={3} label="Description" required htmlFor="pf-desc" error={errors.description}>
+          <Step n={3} label="Description" htmlFor="pf-desc" error={errors.description}>
             <textarea id="pf-desc" ref={descRef} value={f.description} onChange={set("description")} rows={4} maxLength={2000} placeholder="Enter project description" aria-invalid={Boolean(errors.description)} className={fieldCls(errors.description)} />
           </Step>
 
@@ -293,16 +297,37 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
             )}
           </Step>
 
-          <Step n={5} label="Assign project to" htmlFor="pf-assign" hint={assignmentLocked ? `Locked: this project is ${project.status.toLowerCase()} with ${project.assignedToName || "someone"}.` : "Leave empty to put it in the project pool. Staff can then take it themselves."}>
-            <select id="pf-assign" value={f.assignedTo} onChange={set("assignedTo")} disabled={assignmentLocked} className={fieldCls(false)}>
-              <option value="">Project pool (staff can take it)</option>
-              {users.filter((u) => u.isActive !== false).map((u) => (
-                <option key={u._id} value={u._id}>
-                  {u.name}
-                  {u.role ? ` - ${u.role}` : ""}
-                </option>
-              ))}
-            </select>
+          <Step n={5} label="Assign project to" htmlFor="pf-assign" hint={editing ? "Leave empty to put it in the project pool. Staff can then take it themselves." : "Leave everyone unchecked to put it in the project pool - staff can then take it themselves. Check more than one to create the same project for each of them."}>
+            {editing ? (
+              <select id="pf-assign" value={f.assignedTo} onChange={set("assignedTo")} className={fieldCls(false)}>
+                <option value="">Project pool (staff can take it)</option>
+                {users.filter((u) => u.isActive !== false).map((u) => (
+                  <option key={u._id} value={u._id}>
+                    {u.name}
+                    {u.role ? ` - ${u.role}` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div id="pf-assign" className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                <ul className="divide-y divide-slate-100">
+                  {users.filter((u) => u.isActive !== false).map((u) => {
+                    const on = createAssignees.includes(String(u._id));
+                    return (
+                      <li key={u._id}>
+                        <label className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm transition ${on ? "bg-blue-50/70" : "hover:bg-slate-50"}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleCreateAssignee(u._id)} className="h-4 w-4 shrink-0 cursor-pointer accent-blue-600" />
+                          <span className="flex-1 font-semibold text-slate-800">
+                            {u.name}
+                            {u.role ? <span className="font-normal text-slate-400"> - {u.role}</span> : ""}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </Step>
 
           <Step n={6} label="Validity time" htmlFor="pf-validity" error={errors.validity} hint={'Optional. Leave as "No validity time" if there is no deadline. When set, staff who finish before it ends score on-time points.'}>
@@ -331,7 +356,9 @@ export default function ProjectFormModal({ mode = "create", project = null, defa
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
               {[
                 ["Stored under", <span key="t" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-black ${TYPE_STYLE[type]}`}>{type} projects</span>],
-                ["Assignment", f.assignedTo ? <span key="a" className="flex items-center gap-1.5"><UserRound size={14} className="text-blue-600" />{assignee?.name || "Selected staff"}</span> : <span key="p" className="flex items-center gap-1.5"><Layers size={14} className="text-purple-600" />Project pool</span>],
+                ["Assignment", editing
+                  ? (f.assignedTo ? <span key="a" className="flex items-center gap-1.5"><UserRound size={14} className="text-blue-600" />{assignee?.name || "Selected staff"}</span> : <span key="p" className="flex items-center gap-1.5"><Layers size={14} className="text-purple-600" />Project pool</span>)
+                  : (createAssignees.length ? <span key="a" className="flex flex-wrap items-center gap-1.5">{createAssignees.map((id) => <span key={id} className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-0.5 text-xs text-blue-700"><UserRound size={11} />{users.find((u) => String(u._id) === id)?.name || "Staff"}</span>)}</span> : <span key="p" className="flex items-center gap-1.5"><Layers size={14} className="text-purple-600" />Project pool</span>)],
                 ["Images", <span key="i" className="flex items-center gap-1.5"><ImageIcon size={14} className="text-slate-500" />{imageCount ? `${imageCount} selected` : "None (optional)"}</span>],
                 ["Valid until", <span key="v" className="flex items-center gap-1.5"><CalendarClock size={14} className="text-slate-500" />{due ? fmtDateTime(due) : "Not set"}{left && <em className="not-italic text-[10px] font-bold text-slate-400">({left.label})</em>}</span>],
                 ["Status", <span key="s" className="text-amber-600">{editing ? project.status : "Pending"}</span>],

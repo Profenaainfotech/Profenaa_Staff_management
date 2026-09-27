@@ -1,6 +1,6 @@
 // Admin "Wi-Fi Setup" tab:  Branches & networks | Devices | Rules
 import React, { useEffect, useState } from "react";
-import { Building2, Check, Laptop, Pencil, Plus, Router, Save, SlidersHorizontal, Trash2, TriangleAlert, X } from "lucide-react";
+import { Bell, BellRing, Building2, Check, Laptop, Mic, Pencil, Plus, Router, Save, SlidersHorizontal, Trash2, TriangleAlert, Volume2, VolumeX, X } from "lucide-react";
 import { useAsync } from "../../lib/hooks";
 import { fmtDateTime, timeAgo } from "../../lib/format";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Table, Tabs, TextInput, Themed, Toggle, useApi, useConfirm, useToast } from "./ui";
@@ -251,6 +251,176 @@ function Devices({ onPending }) {
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const NUM = (v) => (v === "" ? "" : Number(v));
 
+// ---- voice speak (Web Speech API) ----
+function speakText(text) {
+  if (!window.speechSynthesis) return false;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-IN";
+  u.rate = 0.95;
+  u.pitch = 1;
+  u.volume = 1;
+  window.speechSynthesis.speak(u);
+  return true;
+}
+
+// ---- browser notification test ----
+async function sendBrowserNotif(title, body) {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "default") await Notification.requestPermission();
+  if (Notification.permission !== "granted") return false;
+  new Notification(title, { body, icon: "/favicon.svg", requireInteraction: true });
+  return true;
+}
+
+// ---- Notification test panel (inside Rules) ----
+function NotifTestPanel() {
+  const api = useApi();
+  const toast = useToast();
+  const users = useAsync(() => api.get("/api/UserAccounts/users"), []);
+  const [userId, setUserId] = useState("");
+  const [selfBusy, setSelfBusy] = useState("");
+  const [sendBusy, setSendBusy] = useState(false);
+  const [voiceText, setVoiceText] = useState("CRM has a notification. Please check your attendance status.");
+  const [notifResult, setNotifResult] = useState(null);
+
+  const staffList = (users.data?.users || []).filter((u) => u.isActive !== false);
+
+  // Test CRM notification + voice on THIS browser (admin side)
+  const testSelf = async (type) => {
+    setSelfBusy(type);
+    setNotifResult(null);
+    try {
+      if (type === "voice") {
+        const ok = speakText(voiceText);
+        setNotifResult(ok ? { ok: true, msg: "Voice spoken in your browser. If you heard it, it works." } : { ok: false, msg: "Your browser does not support voice. Try Chrome or Edge." });
+      } else if (type === "browser") {
+        const ok = await sendBrowserNotif("🔔 Profenaa Attendance", "CRM has a notification. Please check your attendance status.");
+        setNotifResult(ok ? { ok: true, msg: "Browser notification sent. Did you see the pop-up?" } : { ok: false, msg: "Browser notification blocked. Click the lock icon in the address bar and allow notifications." });
+      } else if (type === "sound") {
+        // Play a short alarm tone using Web Audio API
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          [880, 660, 880, 660].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = freq;
+            osc.type = "square";
+            gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.25);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.22);
+            osc.start(ctx.currentTime + i * 0.25);
+            osc.stop(ctx.currentTime + i * 0.25 + 0.25);
+          });
+          setNotifResult({ ok: true, msg: "Alarm sound played. If you heard 4 beeps, sound is working." });
+        } catch (e) {
+          setNotifResult({ ok: false, msg: `Sound failed: ${e.message}. Try clicking elsewhere first then retry.` });
+        }
+      }
+    } finally {
+      setSelfBusy("");
+    }
+  };
+
+  // Send a real CRM in-app notification to a staff member (they see it in their bell)
+  const sendToStaff = async () => {
+    if (!userId) return;
+    setSendBusy(true);
+    setNotifResult(null);
+    try {
+      const r = await api.post("/api/settings/test-notification", { userId });
+      setNotifResult({ ok: true, msg: r.message });
+      toast(r.message);
+    } catch (e) {
+      setNotifResult({ ok: false, msg: e.message });
+      toast(e.message, "error");
+    } finally {
+      setSendBusy(false);
+    }
+  };
+
+  return (
+    <Card className="!border-indigo-200 !bg-indigo-50/30">
+      <div className="flex items-center gap-2 mb-4">
+        <BellRing size={16} className="text-indigo-600" />
+        <p className="text-sm font-bold text-slate-800">Test notifications &amp; voice</p>
+        <span className="ml-auto text-[10px] font-bold text-indigo-600 bg-indigo-100 rounded-full px-2 py-0.5">Test tools</span>
+      </div>
+
+      {/* Self-test buttons */}
+      <div className="space-y-3">
+        <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">Test on your browser (admin)</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => testSelf("sound")}
+            disabled={!!selfBusy}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Volume2 size={13} className="text-amber-500" />
+            {selfBusy === "sound" ? "Playing..." : "Play alarm sound"}
+          </button>
+          <button
+            onClick={() => testSelf("voice")}
+            disabled={!!selfBusy}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Mic size={13} className="text-violet-500" />
+            {selfBusy === "voice" ? "Speaking..." : "Speak voice alert"}
+          </button>
+          <button
+            onClick={() => testSelf("browser")}
+            disabled={!!selfBusy}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Bell size={13} className="text-sky-500" />
+            {selfBusy === "browser" ? "Sending..." : "Browser notification"}
+          </button>
+        </div>
+        <Field label="Voice message text (editable)">
+          <input
+            type="text"
+            value={voiceText}
+            onChange={(e) => setVoiceText(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          />
+        </Field>
+      </div>
+
+      <div className="border-t border-indigo-100 my-4" />
+
+      {/* Send to staff */}
+      <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2">Send test to a staff member's CRM</p>
+      <p className="text-[11px] text-slate-500 mb-3">Sends a real bell notification to a specific staff member. Ask them to confirm they saw it (and heard the voice if their volume is on).</p>
+      <div className="flex gap-2">
+        <select
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+          className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+        >
+          <option value="">Select staff member...</option>
+          {staffList.map((u) => (
+            <option key={u._id} value={u._id}>{u.name}{u.role ? ` — ${u.role}` : ""}</option>
+          ))}
+        </select>
+        <button
+          onClick={sendToStaff}
+          disabled={!userId || sendBusy}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          <BellRing size={13} />
+          {sendBusy ? "Sending..." : "Send test"}
+        </button>
+      </div>
+
+      {notifResult && (
+        <div className={`mt-3 rounded-xl px-3 py-2 text-xs font-semibold ${notifResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+          {notifResult.ok ? "✓ " : "✗ "}{notifResult.msg}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Rules() {
   const api = useApi();
   const toast = useToast();
@@ -276,6 +446,8 @@ function Rules() {
         requireOfficeWifiLogin: f.requireOfficeWifiLogin !== false,
         extraOfficeIps: String(f.extraOfficeIpsText ?? (f.extraOfficeIps || []).join(", ")).split(/[\s,]+/).filter(Boolean),
         overtimePromptMinutes: f.overtimePromptMinutes ?? 10, overtimeRecheckMinutes: f.overtimeRecheckMinutes ?? 60,
+        overtimeSound: f.overtimeSound || "ALARM", overtimeSoundSeconds: f.overtimeSoundSeconds ?? 5,
+        offDayAskMinutes: f.offDayAskMinutes ?? 10,
         noResponseAction: f.noResponseAction || "HALF_DAY", dailyReportReminderMinutes: f.dailyReportReminderMinutes ?? 15,
       };
       await api.put("/api/settings", body);
@@ -321,6 +493,17 @@ function Rules() {
             <div className="grid grid-cols-2 gap-4">
               <Field label="Time to answer (minutes)"><TextInput type="number" min={1} max={120} value={f.overtimePromptMinutes ?? 10} onChange={set("overtimePromptMinutes")} /></Field>
               <Field label="Ask again during overtime (min)"><TextInput type="number" min={15} max={480} value={f.overtimeRecheckMinutes ?? 60} onChange={set("overtimeRecheckMinutes")} /></Field>
+              <Field label="Day-off question: time to answer (min)" hint="Sunday / holiday — are you working today?"><TextInput type="number" min={1} max={60} value={f.offDayAskMinutes ?? 10} onChange={set("offDayAskMinutes")} /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <Field label="Alert sound on PC" hint="Plays on repeat inside the HTA pop-up window">
+                <Select value={f.overtimeSound || "ALARM"} onChange={set("overtimeSound")}>
+                  <option value="ALARM">Alarm (repeating beep)</option>
+                  <option value="URGENT_BEEPS">Urgent beeps (faster)</option>
+                  <option value="SIREN">Siren (rising tone)</option>
+                </Select>
+              </Field>
+              <Field label="Sound duration (seconds)" hint="How long the alert plays each beep cycle"><TextInput type="number" min={1} max={30} value={f.overtimeSoundSeconds ?? 5} onChange={set("overtimeSoundSeconds")} /></Field>
             </div>
             <Field label="If nobody answers" className="mt-4" hint="The day always ends at shift end. Nobody is penalised when the PC simply went offline, or on a day off.">
               <Select value={f.noResponseAction || "HALF_DAY"} onChange={set("noResponseAction")}>
@@ -355,6 +538,9 @@ function Rules() {
           </Card>
         </div>
       </div>
+
+      {/* Full-width notification test panel below the 2-col grid */}
+      <NotifTestPanel />
     </div>
   );
 }

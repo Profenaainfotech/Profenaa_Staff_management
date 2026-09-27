@@ -27,6 +27,10 @@ const uploadImages = (req, res, next) =>
 router.post("/create-project", anyAuth.adminOnly, uploadImages, c.createProject);
 // Technologies projects: plain JSON (title, assignedTo, workItemIds) - no images
 router.post("/create-technology", anyAuth.adminOnly, c.createTechnologyProject);
+router.put("/technology/:projectId", anyAuth.adminOnly, c.updateTechnologyProject);
+// Catalog management: delete a project (domain) or a work item
+router.delete("/technology-catalog/domain", anyAuth.adminOnly, c.deleteTechCatalogDomain);
+router.delete("/technology-catalog/item", anyAuth.adminOnly, c.deleteTechCatalogItem);
 router.get("/get-all-projects", anyAuth.adminOnly, c.getAllProjects);
 router.put("/:projectId", anyAuth.adminOnly, uploadImages, c.updateProject);
 router.delete("/:projectId", anyAuth.adminOnly, c.deleteProject);
@@ -34,7 +38,7 @@ router.delete("/:projectId", anyAuth.adminOnly, c.deleteProject);
 // ---------------- staff (and admin) ----------------
 // IMPORTANT: fixed paths must come BEFORE "/:projectId"
 router.get("/pool", anyAuth, c.getProjectPool);
-router.get("/technology-catalog", anyAuth, c.getTechnologycatalog);
+router.get("/technology-catalog", anyAuth, c.getTechnologyCatalog);
 router.get("/leaderboard", anyAuth, c.getLeaderboard);
 router.get("/user/:userId", anyAuth, c.getUserProjects);
 router.get("/stats/:userId", anyAuth, c.getUserProjectStats);

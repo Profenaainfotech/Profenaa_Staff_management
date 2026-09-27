@@ -7,7 +7,13 @@
 // GET /api/Project/technology-catalog, and createTechnologyProject validates
 // against it. To move an item to another domain, rename one, or add a new one,
 // change it here only (keep each item's `id` - old projects store it).
+//
+// Projects / work items the admin deletes from the form are remembered in the
+// TechCatalogState collection and filtered out by current() - see below.
 // =====================================================================
+
+const TechCatalogState = require("../Models/TechCatalogState.Model");
+const STATE_KEY = "technologies";
 
 const DOMAINS = ["Sales", "Training", "Marketing", "Placement", "HR", "Social Media", "Branding"];
 
@@ -40,24 +46,54 @@ const ITEMS = [
   { id: 26, title: "Youth Leadership Parliament", domain: "Branding" },
 ];
 
-const byId = new Map(ITEMS.map((i) => [i.id, i]));
+/**
+ * The catalog as the admin sees it right now: the list above minus whatever was deleted
+ * from the form (a deleted project takes all of its work items with it).
+ */
+async function current() {
+  const state = await TechCatalogState.findOne({ key: STATE_KEY }).lean();
+  const goneDomains = new Set(state?.removedDomains || []);
+  const goneItems = new Set(state?.removedItemIds || []);
+  return {
+    domains: DOMAINS.filter((d) => !goneDomains.has(d)),
+    items: ITEMS.filter((i) => !goneItems.has(i.id) && !goneDomains.has(i.domain)),
+  };
+}
+
+/** Delete a project (domain) from the catalog. Returns false if it is not in the current catalog. */
+async function removeDomain(name) {
+  const { domains } = await current();
+  if (!domains.includes(name)) return false;
+  await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { removedDomains: name } }, { upsert: true });
+  return true;
+}
+
+/** Delete one work item from the catalog. Returns false if it is not in the current catalog. */
+async function removeItem(id) {
+  const { items } = await current();
+  if (!items.some((i) => i.id === id)) return false;
+  await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { removedItemIds: id } }, { upsert: true });
+  return true;
+}
 
 /**
  * Turn the ids the admin ticked into the items to store on the project.
- * Duplicates are dropped; the catalog order is kept. Returns null if any id is not in the catalog.
+ * Duplicates are dropped; the catalog order is kept. Returns null if any id is not in `list`
+ * (pass the current() items so deleted ones are rejected; defaults to the full list).
  */
-function resolveItems(ids) {
+function resolveItems(ids, list = ITEMS) {
   if (!Array.isArray(ids)) return null;
+  const byId = new Map(list.map((i) => [i.id, i]));
   const wanted = new Set();
   for (const raw of ids) {
     const id = Number(raw);
     if (!byId.has(id)) return null;
     wanted.add(id);
   }
-  return ITEMS.filter((i) => wanted.has(i.id)).map((i) => ({ itemId: i.id, title: i.title, domain: i.domain }));
+  return list.filter((i) => wanted.has(i.id)).map((i) => ({ itemId: i.id, title: i.title, domain: i.domain }));
 }
 
 /** The domains that actually appear in a list of items, in catalog order */
 const domainsOf = (items) => DOMAINS.filter((d) => items.some((i) => i.domain === d));
 
-module.exports = { DOMAINS, ITEMS, resolveItems, domainsOf };
+module.exports = { DOMAINS, ITEMS, current, removeDomain, removeItem, resolveItems, domainsOf };

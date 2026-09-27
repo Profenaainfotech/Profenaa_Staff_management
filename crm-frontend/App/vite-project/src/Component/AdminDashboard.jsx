@@ -4279,38 +4279,6 @@ export default function AdminDashboard() {
                 {checkingNow ? "Checking..." : "Check Attendance Now"}
               </button>
 
-              {/* ALARM */}
-
-              <button
-                onClick={
-                  alertsEnabled
-                    ? disableAlerts
-                    : enableAlerts
-                }
-                className={`hidden md:flex items-center gap-2 px-3 py-2.5 border rounded-xl text-xs font-bold transition ${
-                  alertsEnabled
-                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                    : "bg-white border-blue-100 text-slate-600 hover:bg-sky-50"
-                }`}
-                title="Enable or disable overdue alarm"
-              >
-
-                {alertsEnabled ? (
-                  <Volume2
-                    size={15}
-                  />
-                ) : (
-                  <VolumeX
-                    size={15}
-                  />
-                )}
-
-                {alertsEnabled
-                  ? "Alerts On"
-                  : "Enable Alerts"}
-
-              </button>
-
               {/* ACTIVITY (attendance, devices, leave, announcements) */}
 
               <NotificationCenter
@@ -4659,7 +4627,7 @@ export default function AdminDashboard() {
                 />
 
                 <span className="hidden sm:inline">
-                  Assign Task
+                  New Task
                 </span>
 
               </button>

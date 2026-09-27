@@ -113,6 +113,19 @@ const myOvertimeAnswer = handle(async (req, res) => {
   ok(res, r);
 });
 
+// POST /api/attendance/my/offday   { answer: "YES" | "NO" }
+const myOffDayAnswer = handle(async (req, res) => {
+  const r = await engine.answerOffDay(req.payload.id, req.body?.answer, "WEB");
+  if (!r.ok) {
+    const msg =
+      r.code === "EXPIRED"
+        ? "The time to answer has passed — nothing is counted today."
+        : "There is no day-off question waiting for an answer.";
+    throw httpError(409, msg);
+  }
+  ok(res, r);
+});
+
 // POST /api/attendance/my/explain   { date, text }
 const myExplain = handle(async (req, res) => {
   const { date, text } = req.body || {};
@@ -214,6 +227,7 @@ const exists = async (id) => Boolean(await User.exists({ _id: id }));
 
 module.exports = {
   myLive,
+  myOffDayAnswer,
   myMonth,
   myEvents,
   myOvertimeAnswer,

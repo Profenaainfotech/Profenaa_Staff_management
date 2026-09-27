@@ -106,7 +106,7 @@ const taskSchema = new mongoose.Schema(
       type: [
         {
           _id: false,
-          itemId: { type: Number, required: true },
+          itemId: { type: Number, default: 0 },
           title: { type: String, required: true },
           domain: { type: String, required: true },
         },
