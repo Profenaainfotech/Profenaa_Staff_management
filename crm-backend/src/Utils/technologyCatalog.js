@@ -1,7 +1,7 @@
 // =====================================================================
 // TECHNOLOGIES PROJECTS - the catalog the admin picks from
 //
-//   6 domains  ->  23 work items. Every item belongs to exactly one domain.
+//   7 domains  ->  26 work items. Every item belongs to exactly one domain.
 //
 // This file is the ONE place the list lives: the admin form loads it from
 // GET /api/Project/technology-catalog, and createTechnologyProject validates
@@ -9,32 +9,35 @@
 // change it here only (keep each item's `id` - old projects store it).
 // =====================================================================
 
-const DOMAINS = ["Sales", "Training", "Marketing", "Placement", "HR", "Social Media"];
+const DOMAINS = ["Sales", "Training", "Marketing", "Placement", "HR", "Social Media", "Branding"];
 
 const ITEMS = [
-  { id: 1, title: "Students Training", domain: "Training" },
-  { id: 2, title: "Informatic and promotional video", domain: "Marketing" },
+  { id: 1, title: "Projects training", domain: "Training" },
+  { id: 2, title: "information promotion videos", domain: "Marketing" },
   { id: 3, title: "Social media management", domain: "Social Media" },
   { id: 4, title: "College visits", domain: "Sales" },
   { id: 5, title: "Enquiry generation", domain: "Sales" },
-  { id: 6, title: "Promotion Poster creation", domain: "Marketing" },
-  { id: 7, title: "Workshop and webinars", domain: "Marketing" },
+  { id: 6, title: "Promotion Posters creation", domain: "Marketing" },
+  { id: 7, title: "Workshops and webinars", domain: "Marketing" },
   { id: 8, title: "Paid promotions (Meta campaigns)", domain: "Marketing" },
-  { id: 9, title: "Review collection", domain: "Social Media" },
+  { id: 9, title: "Review collections", domain: "Social Media" },
   { id: 10, title: "H.R recruitment", domain: "HR" },
-  { id: 11, title: "Am curio marketing", domain: "Marketing" },
+  { id: 11, title: "Amcurio marketing", domain: "Branding" },
   { id: 12, title: "LinkedIn articles", domain: "Social Media" },
-  { id: 13, title: "Fees collection follow up", domain: "Sales" },
+  { id: 13, title: "Fees collections follow up", domain: "Sales" },
   { id: 14, title: "Testimonial videos", domain: "Social Media" },
   { id: 15, title: "Regular meetings", domain: "HR" },
   { id: 16, title: "CRM updation", domain: "Sales" },
-  { id: 17, title: "Student feedback followup", domain: "Training" },
+  { id: 17, title: "Students feedback followup", domain: "Training" },
   { id: 18, title: "Placement training", domain: "Placement" },
   { id: 19, title: "YouTube maintenance", domain: "Social Media" },
-  { id: 20, title: "Certification and ID card follow up", domain: "Training" },
-  { id: 21, title: "Intern certificate, experience certificate followup", domain: "HR" },
-  { id: 22, title: "Offer letter process", domain: "HR" },
-  { id: 23, title: "Telecalling for existing students in groups", domain: "Sales" },
+  { id: 20, title: "Certifications and ID cards follow up", domain: "Training" },
+  { id: 21, title: "Intern certificates, experience certificates followup", domain: "HR" },
+  { id: 22, title: "Offer letters process", domain: "HR" },
+  { id: 23, title: "Telecalling for lead generation", domain: "Sales" },
+  { id: 24, title: "Profenaa Charitable Trust", domain: "Branding" },
+  { id: 25, title: "Kalviyin Kural", domain: "Branding" },
+  { id: 26, title: "Youth Leadership Parliament", domain: "Branding" },
 ];
 
 const byId = new Map(ITEMS.map((i) => [i.id, i]));

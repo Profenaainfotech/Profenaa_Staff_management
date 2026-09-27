@@ -72,15 +72,14 @@ function parseDue(value, { mustBeFuture }) {
 
 /** Validate the text fields shared by create and edit */
 function readFields(body, { creating, current }) {
+  // Mandatory fields temporarily switched off (Internal/External/Technologies, per
+  // request) - only format/length ceilings are still enforced, nothing is required.
   const title = clean(body.title, 200);
-  if (title.length < 3) throw httpError(400, "Project title is required (at least 3 characters).");
   if (title.length > 120) throw httpError(400, "Project title is too long (maximum 120 characters).");
 
   const issueDetails = clean(body.issueDetails, 1000);
-  if (issueDetails.length < 5) throw httpError(400, "Describe the error or change that has to be made (at least 5 characters).");
 
   const description = clean(body.description, 2000);
-  if (description.length < 10) throw httpError(400, "Project description is required (at least 10 characters).");
 
   const rawType = body.projectType || body.projectCategory; // the screen used to send "projectCategory"
   let projectType = current?.projectType || "Internal";
@@ -199,28 +198,49 @@ const createProject = handle(async (req, res) => {
     const f = readFields(req.body, { creating: true });
     if (uploaded.length > MAX_IMAGES) throw httpError(400, `You can add at most ${MAX_IMAGES} images.`);
 
-    let owner = null;
-    if (req.body.assignedTo) owner = await findStaff(req.body.assignedTo);
+    // Multiple staff: accept either one id (assignedTo) or several (assignedTo as an
+    // array) - one full project (sharing the same images) is created per person, exactly
+    // as if the admin had submitted the form once for each of them.
+    const rawAssignees = Array.isArray(req.body.assignedTo) ? req.body.assignedTo : req.body.assignedTo ? [req.body.assignedTo] : [];
+    const assigneeIds = [...new Set(rawAssignees.filter(Boolean).map(String))];
+    const owners = await Promise.all(assigneeIds.map((id) => findStaff(id)));
 
-    const project = await Project.create({
-      ...f,
-      cardImage: uploaded[0] || "",
-      images: uploaded,
-      createdBy: req.admin?.name || "Admin",
-      status: "Pending",
-      ...poolFields(),
-    });
-
-    let message = `${project.projectType} project created and added to the project pool.`;
-    if (owner) {
-      await spawnTask(project, owner, req.admin?.name);
-      message = `${project.projectType} project created and added to ${owner.name}'s tasks.`;
-    } else {
+    const created = [];
+    if (!owners.length) {
+      const project = await Project.create({
+        ...f,
+        cardImage: uploaded[0] || "",
+        images: uploaded,
+        createdBy: req.admin?.name || "Admin",
+        status: "Pending",
+        ...poolFields(),
+      });
       announcePool(project);
+      await project.populate("assignedTo", POPULATE);
+      created.push(project);
+    } else {
+      for (const owner of owners) {
+        const project = await Project.create({
+          ...f,
+          cardImage: uploaded[0] || "",
+          images: uploaded,
+          createdBy: req.admin?.name || "Admin",
+          status: "Pending",
+          ...poolFields(),
+        });
+        await spawnTask(project, owner, req.admin?.name);
+        await project.populate("assignedTo", POPULATE);
+        created.push(project);
+      }
     }
 
-    await project.populate("assignedTo", POPULATE);
-    return ok(res, { message, project }, 201);
+    const message = !owners.length
+      ? `${created[0].projectType} project created and added to the project pool.`
+      : owners.length === 1
+      ? `${created[0].projectType} project created and added to ${owners[0].name}'s tasks.`
+      : `${created[0].projectType} project created and added to ${owners.length} staff members' tasks.`;
+
+    return ok(res, { message, project: created[0], projects: created }, 201);
   } catch (err) {
     removeFiles(uploaded); // a rejected request must not leave images behind
     throw err;
@@ -232,72 +252,104 @@ const createProject = handle(async (req, res) => {
 //
 // A Technologies project is a title + one staff member + the work items the admin ticked
 // (each item belongs to a domain: Sales, Training, Marketing, Placement, HR, Social Media -
-// see Utils/Technologycatalog). Staff are always chosen up front, so it goes straight to
+// see Utils/technologyCatalog). Staff are always chosen up front, so it goes straight to
 // that person as a task; it never enters the pool.
 // =====================================================================
-const getTechnologycatalog = handle(async (req, res) => ok(res, { domains: catalog.DOMAINS, items: catalog.ITEMS }));
+const getTechnologyCatalog = handle(async (req, res) => ok(res, { domains: catalog.DOMAINS, items: catalog.ITEMS }));
 
 const createTechnologyProject = handle(async (req, res) => {
   const title = clean(req.body.title, 200);
-  if (title.length < 3) throw httpError(400, "Project title is required (at least 3 characters).");
   if (title.length > 120) throw httpError(400, "Project title is too long (maximum 120 characters).");
 
-  if (!req.body.assignedTo) throw httpError(400, "Select the staff member this project is for.");
-  const owner = await findStaff(req.body.assignedTo);
+  // Multiple staff: accept either one id (assignedTo) or several (assignedTo as an
+  // array) - either way, one full project + task + tech-task set is created per person,
+  // exactly as if the admin had submitted the form once for each of them.
+  const rawAssignees = Array.isArray(req.body.assignedTo) ? req.body.assignedTo : req.body.assignedTo ? [req.body.assignedTo] : [];
+  const assigneeIds = [...new Set(rawAssignees.filter(Boolean).map(String))];
+  if (!assigneeIds.length) throw httpError(400, "Select at least one staff member this project is for.");
+  const owners = await Promise.all(assigneeIds.map((id) => findStaff(id)));
 
   const ids = Array.isArray(req.body.workItemIds) ? req.body.workItemIds : [];
-  if (!ids.length) throw httpError(400, "Tick at least one work item.");
-  const workItems = catalog.resolveItems(ids);
-  if (!workItems) throw httpError(400, "One of the selected work items does not exist. Reload the form and try again.");
-  const domains = catalog.domainsOf(workItems);
+  const catalogItems = ids.length ? catalog.resolveItems(ids) : [];
+  if (ids.length && !catalogItems) throw httpError(400, "One of the selected work items does not exist. Reload the form and try again.");
 
-  const project = await Project.create({
-    title,
-    projectType: "Technologies",
-    domains,
-    workItems,
-    description: `${domains.join(", ")} · ${workItems.length} work item${workItems.length === 1 ? "" : "s"}: ${workItems.map((i) => i.title).join("; ")}`.slice(0, 2000),
-    createdBy: req.admin?.name || "Admin",
-    status: "Pending",
-    ...poolFields(),
-  });
-  await spawnTask(project, owner, req.admin?.name); // a summary task, so it also shows on their dashboard and in My Tasks
+  // Custom work items typed in on the spot (the "+" at the end of the work-item list /
+  // domain list) - not saved to the shared catalog, just used for this allocation. Each
+  // needs a title and a domain (an existing one, or a new custom domain name typed in
+  // alongside it); items.forDay / the daily tick logic only ever needs title + domain,
+  // never a catalog id, so these behave identically to a catalog item from there on.
+  const customItems = Array.isArray(req.body.customItems) ? req.body.customItems : [];
+  const customWorkItems = customItems
+    .map((c) => ({ title: clean(c?.title, 200), domain: clean(c?.domain, 60) }))
+    .filter((c) => c.title && c.domain)
+    .map((c, i) => ({ id: `custom-${Date.now()}-${i}`, title: c.title, domain: c.domain }));
 
-  // One TechTask per ticked work item, for the SAME person - these are what actually turn
-  // into tick boxes in their Daily Report and feed the daily percentage (see
-  // Services/techWork.service.js). Without this, ticking the items in the catalog would only
-  // ever create a summary task and never show up for the staff member to tick off daily.
-  const today = dateKey();
-  const techTasks = await TechTask.insertMany(
-    workItems.map((item) => ({
-      title: item.title,
-      kind: "Task",
-      technology: item.domain,
-      assignedTo: owner._id,
-      assignedToName: owner.name,
-      assignedBy: req.admin?.name || "Admin",
-      startDate: today,
-      endDate: "",
-    }))
+  const workItems = [...(catalogItems || []), ...customWorkItems];
+  if (!workItems.length) throw httpError(400, "Tick at least one work item, or add a custom one.");
+  const domains = [...new Set(workItems.map((i) => i.domain))];
+
+  const created = [];
+  for (const owner of owners) {
+    const project = await Project.create({
+      title: title || `${domains.join(", ")} allocation`,
+      projectType: "Technologies",
+      domains,
+      workItems,
+      description: `${domains.join(", ")} · ${workItems.length} work item${workItems.length === 1 ? "" : "s"}: ${workItems.map((i) => i.title).join("; ")}`.slice(0, 2000),
+      createdBy: req.admin?.name || "Admin",
+      status: "Pending",
+      ...poolFields(),
+    });
+    await spawnTask(project, owner, req.admin?.name); // a summary task, so it also shows on their dashboard and in My Tasks
+
+    // One TechTask per ticked work item, for the SAME person - these are what actually turn
+    // into tick boxes in their Daily Report and feed the daily percentage (see
+    // Services/techWork.service.js). Without this, ticking the items in the catalog would only
+    // ever create a summary task and never show up for the staff member to tick off daily.
+    const today = dateKey();
+    const techTasks = await TechTask.insertMany(
+      workItems.map((item) => ({
+        title: item.title,
+        kind: "Task",
+        technology: item.domain,
+        assignedTo: owner._id,
+        assignedToName: owner.name,
+        assignedBy: req.admin?.name || "Admin",
+        startDate: today,
+        endDate: "",
+      }))
+    );
+    project.techTaskIds = techTasks.map((t) => t._id);
+    await project.save();
+
+    await Promise.all(
+      techTasks.map((t) =>
+        notify.notifyUser(owner._id, {
+          category: "task",
+          type: "TECH_TASK_ALLOCATED",
+          severity: "info",
+          title: "Technologies task allocated to you",
+          message: `${t.title} - tick it in your Daily Report on the days you complete it.`,
+          link: "Daily Report",
+        })
+      )
+    );
+
+    await project.populate("assignedTo", POPULATE);
+    created.push({ project, owner });
+  }
+
+  const names = created.map((c) => c.owner.name);
+  const namesText = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return ok(
+    res,
+    {
+      message: `Technologies project created and assigned to ${namesText}. It now shows as ${workItems.length} tickable item${workItems.length === 1 ? "" : "s"} in their Daily Report.`,
+      project: created[0].project, // the caller's existing UI only ever showed one project card per submit; the rest were created identically for the other staff
+      projects: created.map((c) => c.project),
+    },
+    201
   );
-  project.techTaskIds = techTasks.map((t) => t._id);
-  await project.save();
-
-  await Promise.all(
-    techTasks.map((t) =>
-      notify.notifyUser(owner._id, {
-        category: "task",
-        type: "TECH_TASK_ALLOCATED",
-        severity: "info",
-        title: "Technologies task allocated to you",
-        message: `${t.title} - tick it in your Daily Report on the days you complete it.`,
-        link: "Daily Report",
-      })
-    )
-  );
-
-  await project.populate("assignedTo", POPULATE);
-  return ok(res, { message: `Technologies project created and assigned to ${owner.name}. It now shows as ${workItems.length} tickable item${workItems.length === 1 ? "" : "s"} in their Daily Report.`, project }, 201);
 });
 
 // =====================================================================
@@ -328,14 +380,15 @@ const updateProject = handle(async (req, res) => {
     const images = [...before.filter((p) => !removed.includes(p)), ...uploaded];
     if (images.length > MAX_IMAGES) throw httpError(400, `A project can have at most ${MAX_IMAGES} images.`);
 
-    // assignment: only while nobody has been assigned yet (once a task exists, manage it there)
+    // assignment can be changed any time up until the project is Completed - reassigning
+    // moves the associated task too, so the previous assignee's copy of it does not linger
     let newOwnerId;
     if (req.body.assignedTo !== undefined) {
       const wanted = String(req.body.assignedTo || "");
       const currentId = project.assignedTo ? String(project.assignedTo) : "";
       if (wanted !== currentId) {
-        if (project.status !== "Pending") {
-          throw httpError(409, project.status === "Completed" ? "A completed project cannot be reassigned." : `This project has already been assigned to ${project.assignedToName || "someone"}. Manage it from Tasks instead.`);
+        if (project.status === "Completed") {
+          throw httpError(409, "A completed project cannot be reassigned.");
         }
         newOwnerId = wanted || null;
       }
@@ -347,9 +400,24 @@ const updateProject = handle(async (req, res) => {
 
     let message = "Project updated successfully.";
     if (newOwnerId) {
+      if (project.taskId) {
+        await Task.findByIdAndDelete(project.taskId);
+        project.taskId = null;
+      }
       const owner = await findStaff(newOwnerId);
       await spawnTask(project, owner, req.admin?.name);
-      message = `Project updated and added to ${owner.name}'s tasks.`;
+      message = `Project reassigned to ${owner.name}.`;
+    } else if (newOwnerId === null) {
+      // moved back to the pool: the old task no longer belongs to anyone
+      if (project.taskId) {
+        await Task.findByIdAndDelete(project.taskId);
+        project.taskId = null;
+      }
+      project.assignedTo = null;
+      project.assignedToName = "";
+      project.status = "Pending";
+      await project.save();
+      message = "Project moved back to the pool.";
     }
 
     await project.populate("assignedTo", POPULATE);
@@ -659,7 +727,7 @@ const getLeaderboard = handle(async (req, res) => {
 module.exports = {
   createProject,
   createTechnologyProject,
-  getTechnologycatalog,
+  getTechnologyCatalog,
   updateProject,
   deleteProject,
   getAllProjects,
