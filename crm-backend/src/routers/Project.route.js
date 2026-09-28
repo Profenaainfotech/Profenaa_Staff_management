@@ -31,6 +31,7 @@ router.put("/technology/:projectId", anyAuth.adminOnly, c.updateTechnologyProjec
 // Catalog management: add (stored permanently) or delete a project (domain) / a work item
 router.post("/technology-catalog/domain", anyAuth.adminOnly, c.addTechCatalogDomain);
 router.post("/technology-catalog/item", anyAuth.adminOnly, c.addTechCatalogItem);
+router.put("/technology-catalog/item", anyAuth.adminOnly, c.renameTechCatalogItem);
 router.delete("/technology-catalog/domain", anyAuth.adminOnly, c.deleteTechCatalogDomain);
 router.delete("/technology-catalog/item", anyAuth.adminOnly, c.deleteTechCatalogItem);
 router.get("/get-all-projects", anyAuth.adminOnly, c.getAllProjects);

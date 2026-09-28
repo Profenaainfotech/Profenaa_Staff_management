@@ -11,6 +11,10 @@
 // saved to the database the moment the green tick is pressed, so it stays in the list every
 // time the form is opened (POST /technology-catalog/domain and /item).
 // Saving creates one project per selected staff member, straight into their tasks.
+// EDIT (editProject given): the project's current staff and work items come up already ticked.
+// The server does not allow a Technologies project to be edited in place, so saving builds the
+// updated project first and only then removes the old one - the admin ends up with ONE project
+// holding every item, never a second separate one.
 // Nothing on this form is mandatory (temporary, per request) - only format limits still apply.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Cpu, ListChecks, Loader2, Pencil, Plus, RefreshCw, Trash2, UserRound, X } from "lucide-react";
@@ -117,7 +121,7 @@ function AddInline({ placeholder, onAdd }) {
   );
 }
 
-export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
+export default function TechnologyFormModal({ users = [], onClose, onSaved, editProject = null }) {
   const [catalog, setCatalog] = useState(null); // { domains: [...], items: [{ id, title, domain }] }
   const [catalogError, setCatalogError] = useState("");
   const [customDomains, setCustomDomains] = useState([]); // projects added with "+ Add new" (stored on the server)
@@ -131,6 +135,13 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
   const [picked, setPicked] = useState([]); // ticked item ids, across every domain
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  // edit mode: items the project already holds that are not in the saved list any more (one-offs, deleted ones)
+  const [extraItems, setExtraItems] = useState([]); // [{ id: "kept-0", title, domain, itemId }]
+  const [assignedIds, setAssignedIds] = useState(new Set()); // ids that were already in the project when Edit opened
+  const seeded = useRef(false);
+  const renameLock = useRef(false);
+  const isEdit = Boolean(editProject);
+  const editId = editProject?._id || editProject?.id || "";
   const { flash, error: flashError, clear } = useFlash();
   const itemsRef = useRef(null);
 
@@ -153,6 +164,33 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
+
+  // Edit: once the catalog is in, tick what the project already holds and pick its current staff
+  useEffect(() => {
+    if (!editProject || !catalog || seeded.current) return;
+    seeded.current = true;
+    const byId = new Map(catalog.items.map((i) => [i.id, i]));
+    const ids = [];
+    const renamed = {};
+    const extras = [];
+    (editProject.workItems || []).forEach((wi, n) => {
+      const hit = Number(wi.itemId) > 0 ? byId.get(Number(wi.itemId)) : null;
+      if (hit && hit.domain === wi.domain) {
+        ids.push(hit.id);
+        if (hit.title !== wi.title) renamed[hit.id] = wi.title; // it was renamed when it was allocated
+      } else {
+        extras.push({ id: `kept-${n}`, title: wi.title, domain: wi.domain, itemId: Number(wi.itemId) || 0 });
+      }
+    });
+    const owner = String(editProject.assignedTo?._id || editProject.assignedTo || "");
+    setExtraItems(extras);
+    setLocalTitles(renamed);
+    setPicked([...ids, ...extras.map((x) => x.id)]);
+    setAssignedIds(new Set([...ids, ...extras.map((x) => x.id)]));
+    setTitle(editProject.title || "");
+    setAssignedTo(owner ? [owner] : []);
+    setDomain((editProject.workItems || [])[0]?.domain || "");
+  }, [catalog, editProject]);
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape" && !saving) onClose();
@@ -169,8 +207,9 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
     });
 
   const catalogDomains = catalog?.domains || [];
-  const allDomains = catalogDomains;
-  const items = useMemo(() => catalog?.items || [], [catalog]);
+  const items = useMemo(() => [...(catalog?.items || []), ...extraItems], [catalog, extraItems]);
+  // a project's own domain that is not in the saved list any more still gets its chip while editing
+  const allDomains = useMemo(() => [...catalogDomains, ...new Set(extraItems.map((x) => x.domain).filter((d) => !catalogDomains.includes(d)))], [catalogDomains, extraItems]);
   // work items added with "+ Add new" get ids from 1001 up (the built-in ones are 1-26)
   const isAdded = (id) => Number(id) > 1000;
   const shownRaw = useMemo(() => items.filter((i) => i.domain === domain), [items, domain]);
@@ -241,17 +280,40 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
     }
   };
 
-  // --- edit any work item title (session-only for catalog items) ---
+  // --- rename a work item ---
+  // An item in the saved list is renamed on the server, so the new name is permanent and shows
+  // every time the form opens. (While editing a project, an item the saved list no longer has can
+  // only be renamed for that project.)
   const startEditItem = (i) => {
     setEditingItemId(i.id);
     setEditingItemText(localTitles[i.id] ?? i.title);
   };
-  const commitEditItem = () => {
+  const commitEditItem = async () => {
+    if (renameLock.current) return; // Enter and the field losing focus both call this
+    const id = editingItemId;
     const text = editingItemText.trim();
-    // a rename applies to this allocation only - the saved list keeps the original name
-    if (text && editingItemId !== null) setLocalTitles((lt) => ({ ...lt, [editingItemId]: text }));
+    renameLock.current = true;
     setEditingItemId(null);
     setEditingItemText("");
+    try {
+      if (id === null || !text) return;
+      if (typeof id !== "number") {
+        setLocalTitles((lt) => ({ ...lt, [id]: text }));
+        return;
+      }
+      const item = items.find((x) => x.id === id);
+      if (!item || (localTitles[id] ?? item.title) === text) return;
+      const data = await projectRequest("admin", "PUT", "/technology-catalog/item", { json: { id, title: text } });
+      applyCatalog(data);
+      setLocalTitles((lt) => {
+        const { [id]: _gone, ...rest } = lt;
+        return rest;
+      });
+    } catch (err) {
+      flashError(err?.message || "The work item could not be renamed. Please try again.");
+    } finally {
+      renameLock.current = false;
+    }
   };
 
   // --- delete any work item (added ones: removed from the saved list; built-in ones: just uncheck + hide for this session) ---
@@ -297,25 +359,54 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
     }
     try {
       setSaving(true);
+      const newTitle = title.trim() || (isEdit ? editProject.title || "" : "");
+      // items that are still in the saved list go as ids; a renamed one (or one the list no longer has)
+      // goes as customItems, carrying the id it came from
+      const inList = (i) => typeof i.id === "number";
+      const wanted = pickedItems.map((i) => ({ domain: i.domain, title: localTitles[i.id] ?? i.title }));
+
+      if (isEdit) {
+        const sig = (list) => list.map((x) => `${x.domain}|${x.title}`).sort().join("||");
+        const owner = String(editProject.assignedTo?._id || editProject.assignedTo || "");
+        const same = sig(wanted) === sig(editProject.workItems || []) && assignedTo.length === 1 && assignedTo[0] === owner && newTitle === (editProject.title || "");
+        if (same) {
+          onClose(); // nothing was changed
+          return;
+        }
+      }
+
       const data = await projectRequest("admin", "POST", "/create-technology", {
         json: {
-          title: title.trim(),
+          title: newTitle,
           assignedTo,
-          // items taken as they are go as ids; a renamed one goes as customItems (new title + the id it came from)
-          workItemIds: pickedItems.filter((i) => !localTitles[i.id]).map((i) => i.id),
-          customItems: pickedItems.filter((i) => localTitles[i.id]).map((i) => ({ itemId: i.id, title: localTitles[i.id], domain: i.domain })),
+          workItemIds: pickedItems.filter((i) => inList(i) && !localTitles[i.id]).map((i) => i.id),
+          customItems: pickedItems
+            .filter((i) => !inList(i) || localTitles[i.id])
+            .map((i) => ({ itemId: inList(i) ? i.id : i.itemId || 0, title: localTitles[i.id] ?? i.title, domain: i.domain })),
         },
       });
+
+      if (isEdit && editId) {
+        // the updated project exists now - only then is the old one removed (so nothing is ever lost)
+        try {
+          await projectRequest("admin", "DELETE", `/${editId}`);
+        } catch {
+          onSaved(data.project, "Project updated, but the old copy could not be removed automatically. Please delete the old one from the list.");
+          return;
+        }
+        onSaved(data.project, "Project updated. It now holds all the selected work items.");
+        return;
+      }
       onSaved(data.project, data.message);
     } catch (err) {
-      flashError(err?.message || "The project could not be created. Please try again.");
+      flashError(err?.message || (isEdit ? "The project could not be updated. Please try again." : "The project could not be created. Please try again."));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label="Create Technologies project">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label={isEdit ? "Edit Technologies project" : "Create Technologies project"}>
       <form onSubmit={submit} noValidate className="flex max-h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         {/* header */}
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
@@ -324,8 +415,12 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
               <Cpu size={20} />
             </span>
             <div>
-              <h2 className="text-xl font-black text-slate-900">Create Technologies / Education Project</h2>
-              <p className="mt-1 text-xs text-slate-500">Pick a project, tick the work to allocate, and choose the staff member(s). It appears on their dashboard straight away.</p>
+              <h2 className="text-xl font-black text-slate-900">{isEdit ? "Edit Technologies / Education Project" : "Create Technologies / Education Project"}</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {isEdit
+                  ? "The work already assigned is ticked. Tick more to add it to this same project, or untick to remove it."
+                  : "Pick a project, tick the work to allocate, and choose the staff member(s). It appears on their dashboard straight away."}
+              </p>
             </div>
           </div>
           <button type="button" onClick={onClose} disabled={saving} className="rounded-xl bg-slate-100 p-2.5 text-slate-500 hover:bg-slate-200 disabled:opacity-50" aria-label="Close form">
@@ -443,7 +538,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
                             ) : (
                               <span className="flex-1 font-semibold text-slate-800">{displayTitle}</span>
                             )}
-                            <span className="shrink-0 text-[10px] font-black text-slate-300">{custom ? "new" : `#${i.id}`}</span>
+                            <span className="shrink-0 text-[10px] font-black text-slate-300">{assignedIds.has(i.id) ? <span className="text-emerald-500">assigned</span> : custom ? "new" : typeof i.id === "number" ? `#${i.id}` : ""}</span>
                           </label>
                           {!isEditing && (
                             <button
@@ -559,11 +654,11 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
           <button type="submit" disabled={saving || (!catalog && !catalogError)} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-3 text-sm font-bold text-white shadow-lg hover:bg-teal-700 disabled:opacity-60">
             {saving ? (
               <>
-                <Loader2 size={17} className="animate-spin" /> Creating...
+                <Loader2 size={17} className="animate-spin" /> {isEdit ? "Saving..." : "Creating..."}
               </>
             ) : (
               <>
-                <Plus size={18} /> Create Project
+                {isEdit ? <Check size={18} /> : <Plus size={18} />} {isEdit ? "Save Changes" : "Create Project"}
               </>
             )}
           </button>

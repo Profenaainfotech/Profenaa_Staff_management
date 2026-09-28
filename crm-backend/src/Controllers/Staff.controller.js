@@ -120,6 +120,17 @@ async function afterChange(user, before, patch) {
   }
   if (patch.name && patch.name !== before.name) await Device.updateMany({ userId: user._id }, { $set: { userName: patch.name } });
 
+  // a new shift must show in today's late / overtime straight away, not only from tomorrow
+  const shiftChanged =
+    (patch.shiftStart && patch.shiftStart !== before.shiftStart) || (patch.shiftEnd && patch.shiftEnd !== before.shiftEnd);
+  if (shiftChanged && !wentInactive) {
+    try {
+      await engine.refreshTodayForShiftChange(user._id);
+    } catch (err) {
+      console.error("[Staff] could not refresh today's attendance after a shift change:", err.message);
+    }
+  }
+
   const changed =
     (patch.branchId !== undefined && String(patch.branchId || "") !== before.branchId) ||
     (patch.attendanceMode && patch.attendanceMode !== before.attendanceMode) ||

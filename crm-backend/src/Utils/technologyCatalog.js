@@ -12,6 +12,7 @@
 // TechCatalogState collection and filtered out by current() - see below.
 // Projects / work items the admin ADDS with "+ Add new" are stored there too, so they are
 // permanent: current() returns the built-in list plus everything the admin added.
+// Work items the admin RENAMES are stored there too (renameItem), so the new name is permanent.
 // =====================================================================
 
 const TechCatalogState = require("../Models/TechCatalogState.Model");
@@ -62,10 +63,11 @@ async function current() {
   const goneDomains = new Set(state?.removedDomains || []);
   const goneItems = new Set(state?.removedItemIds || []);
   const customDomains = (state?.customDomains || []).filter((d) => !DOMAINS.some((b) => same(b, d)));
+  const renamed = new Map((state?.renamedItems || []).map((r) => [r.id, r.title]));
 
   const domains = [...DOMAINS.filter((d) => !goneDomains.has(d)), ...customDomains];
   const items = [
-    ...ITEMS.filter((i) => !goneItems.has(i.id) && !goneDomains.has(i.domain)),
+    ...ITEMS.filter((i) => !goneItems.has(i.id) && !goneDomains.has(i.domain)).map((i) => ({ ...i, title: renamed.get(i.id) || i.title })),
     ...(state?.customItems || []).filter((i) => !goneItems.has(i.id) && domains.includes(i.domain)).map((i) => ({ id: i.id, title: i.title, domain: i.domain })),
   ];
   // customDomains = the ones the admin added (the form shows a remove button on those)
@@ -114,6 +116,29 @@ async function addItem(rawTitle, rawDomain) {
   const item = { id: CUSTOM_ID_BASE + state.customIdCounter, title, domain };
   await TechCatalogState.updateOne({ key: STATE_KEY }, { $push: { customItems: item } });
   return item;
+}
+
+/**
+ * Give a work item a new name for good (built-in or added). Its id, project and place in the list
+ * stay the same; projects that already used it keep the name they were created with.
+ * Returns the updated { id, title, domain }, null if the id is not in the catalog / the title is
+ * empty, or "DUPLICATE" if another work item in the same project already has that name.
+ */
+async function renameItem(id, rawTitle) {
+  const title = clean(rawTitle, 200);
+  if (!title) return null;
+  const { items } = await current();
+  const item = items.find((i) => i.id === id);
+  if (!item) return null;
+  if (items.some((i) => i.id !== id && i.domain === item.domain && same(i.title, title))) return "DUPLICATE";
+
+  if (ITEMS.some((i) => i.id === id)) {
+    const hit = await TechCatalogState.updateOne({ key: STATE_KEY, "renamedItems.id": id }, { $set: { "renamedItems.$.title": title } });
+    if (!hit.matchedCount) await TechCatalogState.updateOne({ key: STATE_KEY }, { $push: { renamedItems: { id, title } } }, { upsert: true });
+  } else {
+    await TechCatalogState.updateOne({ key: STATE_KEY, "customItems.id": id }, { $set: { "customItems.$.title": title } });
+  }
+  return { id, title, domain: item.domain };
 }
 
 /** Delete a project (domain) from the catalog. Returns false if it is not in the current catalog. */
@@ -165,4 +190,4 @@ const domainsOf = (items) => {
   return [...DOMAINS.filter((d) => present.includes(d)), ...present.filter((d) => !DOMAINS.includes(d))];
 };
 
-module.exports = { DOMAINS, ITEMS, current, addDomain, addItem, removeDomain, removeItem, resolveItems, domainsOf };
+module.exports = { DOMAINS, ITEMS, current, addDomain, addItem, renameItem, removeDomain, removeItem, resolveItems, domainsOf };

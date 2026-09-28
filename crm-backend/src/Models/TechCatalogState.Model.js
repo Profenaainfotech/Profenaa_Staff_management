@@ -10,6 +10,7 @@ const mongoose = require("mongoose");
 //   removedDomains / removedItemIds  built-in ones the admin deleted
 //   customDomains                    projects added with "+ Add new"
 //   customItems                      work items added with "+ Add new"
+//   renamedItems                     new names the admin gave to built-in work items
 //   customIdCounter                  hands out ids for custom items (1001, 1002, ...)
 //                                    so they can never clash with a built-in id
 //
@@ -25,6 +26,14 @@ const customItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const renamedItemSchema = new mongoose.Schema(
+  {
+    id: { type: Number, required: true },
+    title: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
+
 const techCatalogStateSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, default: "technologies" },
@@ -32,6 +41,7 @@ const techCatalogStateSchema = new mongoose.Schema(
     removedItemIds: { type: [Number], default: [] },
     customDomains: { type: [String], default: [] },
     customItems: { type: [customItemSchema], default: [] },
+    renamedItems: { type: [renamedItemSchema], default: [] },
     customIdCounter: { type: Number, default: 0 },
   },
   { timestamps: true }

@@ -275,6 +275,18 @@ const addTechCatalogItem = handle(async (req, res) => {
   return ok(res, { item, ...(await catalog.current()) }, 201);
 });
 
+// Rename a work item (built-in or added) for good. Projects already created keep their own copy of the name.
+const renameTechCatalogItem = handle(async (req, res) => {
+  const id = Number(req.body?.id);
+  const title = clean(req.body?.title, 200);
+  if (!Number.isInteger(id)) throw httpError(400, "Choose the work item to rename.");
+  if (!title) throw httpError(400, "Enter a work item name.");
+  const item = await catalog.renameItem(id, title);
+  if (item === "DUPLICATE") throw httpError(409, "Another work item in this project already has that name.");
+  if (!item) throw httpError(404, "That work item is not in the list any more. Reload the form and try again.");
+  return ok(res, { item, ...(await catalog.current()) });
+});
+
 // Deleting from the catalog never touches projects that already used the item - they keep their own copy.
 // The name / id can come in the query string (?name= / ?id=) or the body.
 const deleteTechCatalogDomain = handle(async (req, res) => {
@@ -769,6 +781,7 @@ module.exports = {
   getTechnologyCatalog,
   addTechCatalogDomain,
   addTechCatalogItem,
+  renameTechCatalogItem,
   deleteTechCatalogDomain,
   deleteTechCatalogItem,
   updateProject,

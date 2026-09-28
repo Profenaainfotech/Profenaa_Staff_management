@@ -799,6 +799,30 @@ async function applyManualTimes({ userId, date, checkIn, checkOut, by, note }) {
   });
 }
 
+/**
+ * The admin changed a person's shift: work today's late / early / overtime out again from the
+ * sessions already recorded, using the new shift. Nothing else on the day is touched (times,
+ * sessions and any manual correction stay exactly as they are).
+ */
+async function refreshTodayForShiftChange(userId) {
+  const user = await User.findById(userId);
+  if (!user) return null;
+  const today = dateKey();
+  const branch = user.branchId ? await Branch.findById(user.branchId) : null;
+  const settings = await getSettings();
+  const ctx = buildCtx(user, branch, settings);
+
+  return withUserLock(user._id, async () => {
+    const att = await Attendance.findOne({ userId: user._id, date: today });
+    if (!att || !att.sessions?.length) return null;
+    ctx.offDay = await offDayFor(settings, branch?._id, today);
+    core.recompute(att, ctx);
+    await att.save();
+    notify.pushAttendanceUpdate(user._id, { date: today, state: att.wifi?.state });
+    return att;
+  });
+}
+
 /** Close whatever is open right now (staff deactivated / mode switched) */
 async function closeOpenSessionFor(userId, reason = "MANUAL") {
   const user = await User.findById(userId);
@@ -1074,6 +1098,7 @@ module.exports = {
   ingestBatch,
   runMonitorTick,
   applyManualTimes,
+  refreshTodayForShiftChange,
   closeOpenSessionFor,
   finalizePastDays,
   finalizeDoc,
