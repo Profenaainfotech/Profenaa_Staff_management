@@ -6,10 +6,10 @@
 //   4 Staff                one or more (only staff the admin already created)
 // ...then a summary of exactly what will be allocated.
 //
-// The domains and the 23 work items come from the server (GET /technology-catalog), so the
-// list lives in one place: crm-backend/src/Utils/technologyCatalog.js. A "+" typed in here
-// adds a custom domain or work item for THIS allocation only (not saved back to that shared
-// catalog) - handy for a one-off addition without editing the source file.
+// The projects and work items come from the server (GET /technology-catalog): the built-in list
+// in crm-backend/src/Utils/technologyCatalog.js plus everything added here. A "+ Add new" is
+// saved to the database the moment the green tick is pressed, so it stays in the list every
+// time the form is opened (POST /technology-catalog/domain and /item).
 // Saving creates one project per selected staff member, straight into their tasks.
 // Nothing on this form is mandatory (temporary, per request) - only format limits still apply.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -48,13 +48,21 @@ function Step({ n, label, hint, error, children, htmlFor }) {
 function AddInline({ placeholder, onAdd }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
     if (open) ref.current?.focus();
   }, [open]);
-  const commit = () => {
+  // onAdd saves to the server and answers false if that failed - then the text stays so nothing is lost
+  const commit = async () => {
+    if (busy) return;
     const v = value.trim();
-    if (v) onAdd(v);
+    if (v) {
+      setBusy(true);
+      const saved = await onAdd(v);
+      setBusy(false);
+      if (saved === false) return;
+    }
     setValue("");
     setOpen(false);
   };
@@ -87,18 +95,20 @@ function AddInline({ placeholder, onAdd }) {
         }}
         placeholder={placeholder}
         maxLength={120}
-        className="rounded-full border border-teal-300 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-100"
+        disabled={busy}
+        className="rounded-full border border-teal-300 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-100 disabled:opacity-60"
       />
-      <button type="button" onClick={commit} className="rounded-full bg-teal-600 p-2 text-white hover:bg-teal-700" aria-label="Add">
-        <Check size={14} />
+      <button type="button" onClick={commit} disabled={busy} className="rounded-full bg-teal-600 p-2 text-white hover:bg-teal-700 disabled:opacity-60" aria-label="Add">
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
       </button>
       <button
         type="button"
+        disabled={busy}
         onClick={() => {
           setValue("");
           setOpen(false);
         }}
-        className="rounded-full bg-slate-100 p-2 text-slate-500 hover:bg-slate-200"
+        className="rounded-full bg-slate-100 p-2 text-slate-500 hover:bg-slate-200 disabled:opacity-60"
         aria-label="Cancel"
       >
         <X size={14} />
@@ -110,11 +120,11 @@ function AddInline({ placeholder, onAdd }) {
 export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
   const [catalog, setCatalog] = useState(null); // { domains: [...], items: [{ id, title, domain }] }
   const [catalogError, setCatalogError] = useState("");
-  const [customDomains, setCustomDomains] = useState([]); // domain names typed in here, not from the catalog
-  const [customItemsByDomain, setCustomItemsByDomain] = useState({}); // { [domain]: [{ id, title, domain }] }
+  const [customDomains, setCustomDomains] = useState([]); // projects added with "+ Add new" (stored on the server)
   const [editingItemId, setEditingItemId] = useState(null); // id of the work item currently being renamed
   const [editingItemText, setEditingItemText] = useState(""); // current text in the rename input
   const [localTitles, setLocalTitles] = useState({}); // { [id]: string } - overrides for catalog item titles (session only)
+  const [hiddenItemIds, setHiddenItemIds] = useState(new Set()); // catalog items hidden for this session
   const [title, setTitle] = useState("");
   const [assignedTo, setAssignedTo] = useState([]); // one or more staff ids
   const [domain, setDomain] = useState(""); // the domain whose items are on screen ("" = none picked yet)
@@ -124,15 +134,21 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
   const { flash, error: flashError, clear } = useFlash();
   const itemsRef = useRef(null);
 
+  // Every catalog answer (load, add, delete) carries the whole current catalog
+  const applyCatalog = useCallback((data) => {
+    setCatalog({ domains: data.domains || [], items: data.items || [] });
+    setCustomDomains(data.customDomains || []);
+  }, []);
+
   const loadCatalog = useCallback(async () => {
     setCatalogError("");
     try {
       const data = await projectRequest("admin", "GET", "/technology-catalog");
-      setCatalog({ domains: data.domains || [], items: data.items || [] });
+      applyCatalog(data);
     } catch (err) {
       setCatalogError(err.message || "The work items could not be loaded.");
     }
-  }, []);
+  }, [applyCatalog]);
 
   useEffect(() => {
     loadCatalog();
@@ -153,10 +169,10 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
     });
 
   const catalogDomains = catalog?.domains || [];
-  const allDomains = useMemo(() => [...catalogDomains, ...customDomains], [catalogDomains, customDomains]);
-  const catalogItemList = catalog?.items || [];
-  const customItemList = useMemo(() => Object.values(customItemsByDomain).flat(), [customItemsByDomain]);
-  const items = useMemo(() => [...catalogItemList, ...customItemList], [catalogItemList, customItemList]);
+  const allDomains = catalogDomains;
+  const items = useMemo(() => catalog?.items || [], [catalog]);
+  // work items added with "+ Add new" get ids from 1001 up (the built-in ones are 1-26)
+  const isAdded = (id) => Number(id) > 1000;
   const shownRaw = useMemo(() => items.filter((i) => i.domain === domain), [items, domain]);
   const shown = useMemo(() => shownRaw.filter((i) => !hiddenItemIds.has(i.id)), [shownRaw, hiddenItemIds]);
   const pickedItems = useMemo(() => items.filter((i) => picked.includes(i.id)), [items, picked]);
@@ -166,39 +182,63 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
   const assignees = staff.filter((u) => assignedTo.includes(String(u._id)));
   const summaryDomains = allDomains.filter((d) => pickedIn(d) > 0);
 
-  const addDomain = (name) => {
-    if (allDomains.some((d) => d.toLowerCase() === name.toLowerCase())) {
-      setDomain(allDomains.find((d) => d.toLowerCase() === name.toLowerCase()));
-      return;
+  const addDomain = async (name) => {
+    const found = allDomains.find((d) => d.toLowerCase() === name.toLowerCase());
+    if (found) {
+      setDomain(found);
+      return true;
     }
-    setCustomDomains((c) => [...c, name]);
-    setDomain(name);
+    try {
+      const data = await projectRequest("admin", "POST", "/technology-catalog/domain", { json: { name } });
+      applyCatalog(data);
+      setDomain(data.domain);
+      return true;
+    } catch (err) {
+      flashError(err?.message || "The project could not be added. Please try again.");
+      return false;
+    }
   };
-  const addWorkItem = (text) => {
+  const addWorkItem = async (text) => {
     const d = domain || allDomains[0];
-    if (!d) return;
-    const id = `custom-${Date.now()}`;
-    setCustomItemsByDomain((c) => ({ ...c, [d]: [...(c[d] || []), { id, title: text, domain: d }] }));
-    setPicked((c) => [...c, id]);
-    if (!domain) setDomain(d);
-    clearError("items");
+    if (!d) {
+      flashError("Add a project first, then add work items to it.");
+      return false;
+    }
+    try {
+      const data = await projectRequest("admin", "POST", "/technology-catalog/item", { json: { title: text, domain: d } });
+      applyCatalog(data);
+      setPicked((c) => (c.includes(data.item.id) ? c : [...c, data.item.id]));
+      if (!domain) setDomain(d);
+      clearError("items");
+      return true;
+    } catch (err) {
+      flashError(err?.message || "The work item could not be added. Please try again.");
+      return false;
+    }
   };
 
-  // Undo a "+ Add new" - only ever for something typed in on this form (a catalog
-  // project/work item is shared and never removable from here).
-  const removeCustomDomain = (name) => {
-    const idsUnderDomain = (customItemsByDomain[name] || []).map((i) => i.id);
-    setCustomDomains((c) => c.filter((d) => d !== name));
-    setCustomItemsByDomain((c) => {
-      const { [name]: _gone, ...rest } = c;
-      return rest;
-    });
-    setPicked((c) => c.filter((id) => !idsUnderDomain.includes(id)));
-    if (domain === name) setDomain("");
+  // Remove something that was added with "+ Add new" - removed from the saved list too (a
+  // built-in project is never removable from here). Projects already created keep their own copy.
+  const removeCustomDomain = async (name) => {
+    if (!window.confirm(`Remove the "${name}" project and its work items from the list?`)) return;
+    try {
+      const idsUnderDomain = items.filter((i) => i.domain === name).map((i) => i.id);
+      const data = await projectRequest("admin", "DELETE", `/technology-catalog/domain?name=${encodeURIComponent(name)}`);
+      applyCatalog(data);
+      setPicked((c) => c.filter((id) => !idsUnderDomain.includes(id)));
+      if (domain === name) setDomain("");
+    } catch (err) {
+      flashError(err?.message || "The project could not be removed. Please try again.");
+    }
   };
-  const removeCustomWorkItem = (id, d) => {
-    setCustomItemsByDomain((c) => ({ ...c, [d]: (c[d] || []).filter((i) => i.id !== id) }));
-    setPicked((c) => c.filter((x) => x !== id));
+  const removeCustomWorkItem = async (id) => {
+    try {
+      const data = await projectRequest("admin", "DELETE", `/technology-catalog/item?id=${encodeURIComponent(id)}`);
+      applyCatalog(data);
+      setPicked((c) => c.filter((x) => x !== id));
+    } catch (err) {
+      flashError(err?.message || "The work item could not be removed. Please try again.");
+    }
   };
 
   // --- edit any work item title (session-only for catalog items) ---
@@ -208,32 +248,16 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
   };
   const commitEditItem = () => {
     const text = editingItemText.trim();
-    if (text && editingItemId !== null) {
-      const isCustom = String(editingItemId).startsWith("custom-");
-      if (isCustom) {
-        // update in customItemsByDomain
-        setCustomItemsByDomain((c) => {
-          const next = { ...c };
-          for (const d of Object.keys(next)) {
-            next[d] = next[d].map((it) => it.id === editingItemId ? { ...it, title: text } : it);
-          }
-          return next;
-        });
-      } else {
-        // catalog item: store override locally (not saved to backend)
-        setLocalTitles((lt) => ({ ...lt, [editingItemId]: text }));
-      }
-    }
+    // a rename applies to this allocation only - the saved list keeps the original name
+    if (text && editingItemId !== null) setLocalTitles((lt) => ({ ...lt, [editingItemId]: text }));
     setEditingItemId(null);
     setEditingItemText("");
   };
 
-  // --- delete any work item (catalog items: just uncheck + hide for this session) ---
-  const [hiddenItemIds, setHiddenItemIds] = useState(new Set()); // catalog items hidden for this session
+  // --- delete any work item (added ones: removed from the saved list; built-in ones: just uncheck + hide for this session) ---
   const deleteItem = (i) => {
-    const isCustom = String(i.id).startsWith("custom-");
-    if (isCustom) {
-      removeCustomWorkItem(i.id, i.domain);
+    if (isAdded(i.id)) {
+      removeCustomWorkItem(i.id);
     } else {
       // hide catalog item for this session and uncheck it
       setHiddenItemIds((prev) => new Set([...prev, i.id]));
@@ -273,17 +297,13 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
     }
     try {
       setSaving(true);
-      const customPicked = pickedItems.filter((i) => String(i.id).startsWith("custom-"));
       const data = await projectRequest("admin", "POST", "/create-technology", {
         json: {
           title: title.trim(),
           assignedTo,
-          // catalog items that were renamed go as customItems (new title), NOT as workItemIds
-          workItemIds: pickedItems.filter((i) => !String(i.id).startsWith("custom-") && !localTitles[i.id]).map((i) => i.id),
-          customItems: [
-            ...customPicked.map((i) => ({ title: localTitles[i.id] ?? i.title, domain: i.domain })),
-            ...pickedItems.filter((i) => !String(i.id).startsWith("custom-") && localTitles[i.id]).map((i) => ({ title: localTitles[i.id], domain: i.domain })),
-          ].filter((c) => c.title && c.domain),
+          // items taken as they are go as ids; a renamed one goes as customItems (new title + the id it came from)
+          workItemIds: pickedItems.filter((i) => !localTitles[i.id]).map((i) => i.id),
+          customItems: pickedItems.filter((i) => localTitles[i.id]).map((i) => ({ itemId: i.id, title: localTitles[i.id], domain: i.domain })),
         },
       });
       onSaved(data.project, data.message);
@@ -370,7 +390,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
                           onClick={() => removeCustomDomain(d)}
                           className={`rounded-full p-1 ${active ? "text-white/80 hover:bg-white/20 hover:text-white" : "text-slate-400 hover:bg-red-50 hover:text-red-600"}`}
                           aria-label={`Remove the "${d}" project you added`}
-                          title="Remove this - it was added on this form, not from the catalog"
+                          title="Remove this project from the list - it was added with + Add new"
                         >
                           <X size={13} />
                         </button>
@@ -402,7 +422,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
                   <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto" aria-label={`${domain} work items`}>
                     {shown.map((i) => {
                       const on = picked.includes(i.id);
-                      const custom = String(i.id).startsWith("custom-");
+                      const custom = isAdded(i.id);
                       const displayTitle = localTitles[i.id] ?? i.title;
                       const isEditing = editingItemId === i.id;
                       return (
@@ -441,7 +461,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved }) {
                             onClick={() => deleteItem(i)}
                             className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
                             aria-label={`Delete "${displayTitle}"`}
-                            title={custom ? "Remove this custom item" : "Hide this item from the list"}
+                            title={custom ? "Remove this item from the list" : "Hide this item from the list"}
                           >
                             <Trash2 size={13} />
                           </button>

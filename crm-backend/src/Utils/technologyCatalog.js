@@ -10,10 +10,13 @@
 //
 // Projects / work items the admin deletes from the form are remembered in the
 // TechCatalogState collection and filtered out by current() - see below.
+// Projects / work items the admin ADDS with "+ Add new" are stored there too, so they are
+// permanent: current() returns the built-in list plus everything the admin added.
 // =====================================================================
 
 const TechCatalogState = require("../Models/TechCatalogState.Model");
 const STATE_KEY = "technologies";
+const CUSTOM_ID_BASE = 1000; // custom work items get 1001, 1002, ... (built-in ones are 1-26)
 
 const DOMAINS = ["Sales", "Training", "Marketing", "Placement", "HR", "Social Media", "Branding"];
 
@@ -46,25 +49,83 @@ const ITEMS = [
   { id: 26, title: "Youth Leadership Parliament", domain: "Branding" },
 ];
 
+const clean = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
 /**
- * The catalog as the admin sees it right now: the list above minus whatever was deleted
- * from the form (a deleted project takes all of its work items with it).
+ * The catalog as the admin sees it right now: the built-in list plus everything the admin
+ * added, minus whatever was deleted from the form (a deleted project takes all of its work
+ * items with it).
  */
 async function current() {
   const state = await TechCatalogState.findOne({ key: STATE_KEY }).lean();
   const goneDomains = new Set(state?.removedDomains || []);
   const goneItems = new Set(state?.removedItemIds || []);
-  return {
-    domains: DOMAINS.filter((d) => !goneDomains.has(d)),
-    items: ITEMS.filter((i) => !goneItems.has(i.id) && !goneDomains.has(i.domain)),
-  };
+  const customDomains = (state?.customDomains || []).filter((d) => !DOMAINS.some((b) => same(b, d)));
+
+  const domains = [...DOMAINS.filter((d) => !goneDomains.has(d)), ...customDomains];
+  const items = [
+    ...ITEMS.filter((i) => !goneItems.has(i.id) && !goneDomains.has(i.domain)),
+    ...(state?.customItems || []).filter((i) => !goneItems.has(i.id) && domains.includes(i.domain)).map((i) => ({ id: i.id, title: i.title, domain: i.domain })),
+  ];
+  // customDomains = the ones the admin added (the form shows a remove button on those)
+  return { domains, items, customDomains: customDomains.filter((d) => domains.includes(d)) };
+}
+
+/**
+ * Add a project (domain) to the catalog for good. Adding a name that already exists (any
+ * case) just returns the existing one; adding back a built-in one that was deleted restores it.
+ * Returns the stored name.
+ */
+async function addDomain(rawName) {
+  const name = clean(rawName, 60);
+  if (!name) return null;
+  const { domains } = await current();
+  const existing = domains.find((d) => same(d, name));
+  if (existing) return existing;
+
+  const builtIn = DOMAINS.find((d) => same(d, name));
+  if (builtIn) {
+    await TechCatalogState.updateOne({ key: STATE_KEY }, { $pull: { removedDomains: builtIn } }, { upsert: true });
+    return builtIn;
+  }
+  await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { customDomains: name } }, { upsert: true });
+  return name;
+}
+
+/**
+ * Add a work item to a project (domain) for good. The domain must already be in the catalog.
+ * The same title in the same project is not added twice - the existing one is returned.
+ * Custom ids start at 1001, so they never clash with a built-in id. Returns { id, title, domain },
+ * or null if the title is empty or the domain is not in the catalog.
+ */
+async function addItem(rawTitle, rawDomain) {
+  const title = clean(rawTitle, 200);
+  if (!title) return null;
+  const { domains, items } = await current();
+  const domain = domains.find((d) => same(d, clean(rawDomain, 60)));
+  if (!domain) return null;
+
+  const existing = items.find((i) => i.domain === domain && same(i.title, title));
+  if (existing) return existing;
+
+  // atomic counter: two admins adding at the same moment can never get the same id
+  const state = await TechCatalogState.findOneAndUpdate({ key: STATE_KEY }, { $inc: { customIdCounter: 1 } }, { upsert: true, returnDocument: "after" });
+  const item = { id: CUSTOM_ID_BASE + state.customIdCounter, title, domain };
+  await TechCatalogState.updateOne({ key: STATE_KEY }, { $push: { customItems: item } });
+  return item;
 }
 
 /** Delete a project (domain) from the catalog. Returns false if it is not in the current catalog. */
 async function removeDomain(name) {
   const { domains } = await current();
-  if (!domains.includes(name)) return false;
-  await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { removedDomains: name } }, { upsert: true });
+  const domain = domains.find((d) => d === name);
+  if (!domain) return false;
+  if (DOMAINS.includes(domain)) {
+    await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { removedDomains: domain } }, { upsert: true });
+  } else {
+    await TechCatalogState.updateOne({ key: STATE_KEY }, { $pull: { customDomains: domain, customItems: { domain } } });
+  }
   return true;
 }
 
@@ -72,14 +133,19 @@ async function removeDomain(name) {
 async function removeItem(id) {
   const { items } = await current();
   if (!items.some((i) => i.id === id)) return false;
-  await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { removedItemIds: id } }, { upsert: true });
+  if (ITEMS.some((i) => i.id === id)) {
+    await TechCatalogState.updateOne({ key: STATE_KEY }, { $addToSet: { removedItemIds: id } }, { upsert: true });
+  } else {
+    await TechCatalogState.updateOne({ key: STATE_KEY }, { $pull: { customItems: { id } } });
+  }
   return true;
 }
 
 /**
  * Turn the ids the admin ticked into the items to store on the project.
  * Duplicates are dropped; the catalog order is kept. Returns null if any id is not in `list`
- * (pass the current() items so deleted ones are rejected; defaults to the full list).
+ * (pass the current() items so deleted ones are rejected; defaults to the built-in list).
+ * Every stored item carries a real numeric itemId.
  */
 function resolveItems(ids, list = ITEMS) {
   if (!Array.isArray(ids)) return null;
@@ -93,7 +159,10 @@ function resolveItems(ids, list = ITEMS) {
   return list.filter((i) => wanted.has(i.id)).map((i) => ({ itemId: i.id, title: i.title, domain: i.domain }));
 }
 
-/** The domains that actually appear in a list of items, in catalog order */
-const domainsOf = (items) => DOMAINS.filter((d) => items.some((i) => i.domain === d));
+/** The domains that actually appear in a list of items: built-in ones in catalog order, then any added ones */
+const domainsOf = (items) => {
+  const present = [...new Set(items.map((i) => i.domain))];
+  return [...DOMAINS.filter((d) => present.includes(d)), ...present.filter((d) => !DOMAINS.includes(d))];
+};
 
-module.exports = { DOMAINS, ITEMS, current, removeDomain, removeItem, resolveItems, domainsOf };
+module.exports = { DOMAINS, ITEMS, current, addDomain, addItem, removeDomain, removeItem, resolveItems, domainsOf };

@@ -23,6 +23,11 @@ Taskrouter.post("/create-task", anyAuth.adminOnly, createTask);
 Taskrouter.get("/get-all-tasks", anyAuth.adminOnly, getAllTasks);
 Taskrouter.put("/update-task/:taskId", anyAuth.adminOnly, updateTask);
 
+// The admin dashboard polls this. Submissions live inside each task (get-all-tasks), and the
+// dashboard already reads them from there when this list is empty - so answering with an empty
+// list keeps that behaviour exactly, without the 404 that filled the browser console.
+Taskrouter.get("/submissions", anyAuth.adminOnly, (req, res) => res.json({ success: true, submissions: [] }));
+
 // =====================================================
 // STAFF (and admin)
 // =====================================================

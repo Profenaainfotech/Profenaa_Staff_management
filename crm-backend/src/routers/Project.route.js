@@ -28,7 +28,9 @@ router.post("/create-project", anyAuth.adminOnly, uploadImages, c.createProject)
 // Technologies projects: plain JSON (title, assignedTo, workItemIds) - no images
 router.post("/create-technology", anyAuth.adminOnly, c.createTechnologyProject);
 router.put("/technology/:projectId", anyAuth.adminOnly, c.updateTechnologyProject);
-// Catalog management: delete a project (domain) or a work item
+// Catalog management: add (stored permanently) or delete a project (domain) / a work item
+router.post("/technology-catalog/domain", anyAuth.adminOnly, c.addTechCatalogDomain);
+router.post("/technology-catalog/item", anyAuth.adminOnly, c.addTechCatalogItem);
 router.delete("/technology-catalog/domain", anyAuth.adminOnly, c.deleteTechCatalogDomain);
 router.delete("/technology-catalog/item", anyAuth.adminOnly, c.deleteTechCatalogItem);
 router.get("/get-all-projects", anyAuth.adminOnly, c.getAllProjects);

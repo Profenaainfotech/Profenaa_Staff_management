@@ -6382,10 +6382,6 @@ export default function AdminDashboard() {
                           </th>
 
                           <th className="text-left px-5 py-4 text-[10px] uppercase text-slate-400 font-bold">
-                            Working Time
-                          </th>
-
-                          <th className="text-left px-5 py-4 text-[10px] uppercase text-slate-400 font-bold">
                             Tasks
                           </th>
 
@@ -6510,16 +6506,6 @@ export default function AdminDashboard() {
                                       ? "Online"
                                       : "Offline"}
 
-                                  </span>
-
-                                </td>
-
-                                <td className="px-5 py-4">
-
-                                  <span className="text-xs font-semibold">
-                                    {formatWorkingTime(
-                                      user
-                                    )}
                                   </span>
 
                                 </td>

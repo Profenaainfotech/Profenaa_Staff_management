@@ -255,7 +255,44 @@ const createProject = handle(async (req, res) => {
 // see Utils/technologyCatalog). Staff are always chosen up front, so it goes straight to
 // that person as a task; it never enters the pool.
 // =====================================================================
-const getTechnologyCatalog = handle(async (req, res) => ok(res, { domains: catalog.DOMAINS, items: catalog.ITEMS }));
+const getTechnologyCatalog = handle(async (req, res) => ok(res, await catalog.current()));
+
+// "+ Add new" on the form: a project (domain) or a work item is stored for good, so it is
+// still in the list the next time the form opens. Every answer carries the fresh catalog so
+// the form can redraw straight from it.
+const addTechCatalogDomain = handle(async (req, res) => {
+  const name = clean(req.body?.name, 60);
+  if (!name) throw httpError(400, "Enter a project name.");
+  const domain = await catalog.addDomain(name);
+  return ok(res, { domain, ...(await catalog.current()) }, 201);
+});
+
+const addTechCatalogItem = handle(async (req, res) => {
+  const title = clean(req.body?.title, 200);
+  if (!title) throw httpError(400, "Enter a work item name.");
+  const item = await catalog.addItem(title, req.body?.domain);
+  if (!item) throw httpError(400, "That project is not in the list any more. Reload the form and try again.");
+  return ok(res, { item, ...(await catalog.current()) }, 201);
+});
+
+// Deleting from the catalog never touches projects that already used the item - they keep their own copy.
+// The name / id can come in the query string (?name= / ?id=) or the body.
+const deleteTechCatalogDomain = handle(async (req, res) => {
+  const name = clean(req.query?.name ?? req.body?.name, 60);
+  if (!name || !(await catalog.removeDomain(name))) throw httpError(404, "That project is not in the list.");
+  return ok(res, await catalog.current());
+});
+
+const deleteTechCatalogItem = handle(async (req, res) => {
+  const id = Number(req.query?.id ?? req.body?.id);
+  if (!Number.isInteger(id) || !(await catalog.removeItem(id))) throw httpError(404, "That work item is not in the list.");
+  return ok(res, await catalog.current());
+});
+
+// Same rule as PUT /:projectId: a Technologies project is deleted and created again, never edited.
+const updateTechnologyProject = handle(async () => {
+  throw httpError(409, "A Technologies project cannot be edited. Delete it and create it again with the right work items.");
+});
 
 const createTechnologyProject = handle(async (req, res) => {
   const title = clean(req.body.title, 200);
@@ -270,7 +307,7 @@ const createTechnologyProject = handle(async (req, res) => {
   const owners = await Promise.all(assigneeIds.map((id) => findStaff(id)));
 
   const ids = Array.isArray(req.body.workItemIds) ? req.body.workItemIds : [];
-  const catalogItems = ids.length ? catalog.resolveItems(ids) : [];
+  const catalogItems = ids.length ? catalog.resolveItems(ids, (await catalog.current()).items) : [];
   if (ids.length && !catalogItems) throw httpError(400, "One of the selected work items does not exist. Reload the form and try again.");
 
   // Custom work items typed in on the spot (the "+" at the end of the work-item list /
@@ -279,10 +316,11 @@ const createTechnologyProject = handle(async (req, res) => {
   // alongside it); items.forDay / the daily tick logic only ever needs title + domain,
   // never a catalog id, so these behave identically to a catalog item from there on.
   const customItems = Array.isArray(req.body.customItems) ? req.body.customItems : [];
+  // A renamed catalog item arrives with the id it came from (itemId); a one-off item has none.
+  // Either way a real number is stored, so nothing downstream ever sees a missing itemId.
   const customWorkItems = customItems
-    .map((c) => ({ title: clean(c?.title, 200), domain: clean(c?.domain, 60) }))
-    .filter((c) => c.title && c.domain)
-    .map((c, i) => ({ itemId: 0, title: c.title, domain: c.domain }));
+    .map((c) => ({ itemId: Number.isFinite(Number(c?.itemId)) ? Number(c.itemId) : 0, title: clean(c?.title, 200), domain: clean(c?.domain, 60) }))
+    .filter((c) => c.title && c.domain);
 
   const workItems = [...(catalogItems || []), ...customWorkItems];
   if (!workItems.length) throw httpError(400, "Tick at least one work item, or add a custom one.");
@@ -727,7 +765,12 @@ const getLeaderboard = handle(async (req, res) => {
 module.exports = {
   createProject,
   createTechnologyProject,
+  updateTechnologyProject,
   getTechnologyCatalog,
+  addTechCatalogDomain,
+  addTechCatalogItem,
+  deleteTechCatalogDomain,
+  deleteTechCatalogItem,
   updateProject,
   deleteProject,
   getAllProjects,
