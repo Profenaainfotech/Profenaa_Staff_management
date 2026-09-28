@@ -1,5 +1,5 @@
 // Employee "Leaves" tab: balances, apply, history, upcoming holidays.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { CalendarOff, PartyPopper, Plus } from "lucide-react";
 import { useAsync } from "../../lib/hooks";
 import { addDaysKey, fmtDay, istDateKey } from "../../lib/format";
@@ -12,15 +12,36 @@ function ApplyModal({ open, onClose, onDone }) {
   const api = useApi();
   const toast = useToast();
   const today = istDateKey();
-  const blank = { type: "Casual Leave", fromDate: today, toDate: today, halfDay: false, reason: "" };
+  const blank = { type: "Casual Leave", fromDate: today, toDate: today, halfDay: false, reason: "", coverUserId: "" };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
+  const [people, setPeople] = useState(null); // colleagues who can cover the pending work (null = loading)
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+
+  // Work From Home is not time away from work, so it needs no one to cover
+  const needsCover = f.type !== "Work From Home";
+
+  // The colleague list is asked for again when the dates change, so anyone who is on approved
+  // leave in that period is shown as unavailable.
+  useEffect(() => {
+    if (!open || !f.fromDate || !f.toDate) return undefined;
+    let live = true;
+    api
+      .get("/api/leaves/colleagues", { from: f.fromDate, to: f.toDate })
+      .then((r) => live && setPeople(r.staff || []))
+      .catch(() => live && setPeople([]));
+    return () => {
+      live = false;
+    };
+  }, [open, f.fromDate, f.toDate, api]);
+
+  const chosen = (people || []).find((p) => p._id === f.coverUserId);
+  const chosenAway = Boolean(chosen?.onLeave);
 
   const submit = async () => {
     setBusy(true);
     try {
-      const r = await api.post("/api/leaves", f);
+      const r = await api.post("/api/leaves", { ...f, coverUserId: f.coverUserId || undefined });
       toast(`Request sent (${r.leave.days} working day${r.leave.days === 1 ? "" : "s"})`);
       setF(blank);
       onDone();
@@ -38,7 +59,7 @@ function ApplyModal({ open, onClose, onDone }) {
       onClose={onClose}
       title="Apply for leave"
       subtitle="Weekly offs and holidays inside the range are not counted."
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!f.reason.trim() || !f.fromDate || !f.toDate}>Send request</Button></>}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!f.reason.trim() || !f.fromDate || !f.toDate || (needsCover && !f.coverUserId) || chosenAway}>Send request</Button></>}
     >
       <div className="space-y-4">
         <Field label="Type"><Select value={f.type} onChange={set("type")}>{TYPES.map((t) => <option key={t}>{t}</option>)}</Select></Field>
@@ -48,6 +69,25 @@ function ApplyModal({ open, onClose, onDone }) {
         </div>
         {f.fromDate === f.toDate && <Toggle checked={f.halfDay} onChange={(v) => setF((x) => ({ ...x, halfDay: v }))} label="Half day" />}
         <Field label="Reason"><TextArea value={f.reason} onChange={set("reason")} maxLength={500} placeholder="Family function" /></Field>
+        <Field
+          label={needsCover ? "Alternative staff *" : "Alternative staff (optional)"}
+          hint={
+            chosenAway
+              ? `${chosen.name} is on approved leave on these dates. Choose someone else.`
+              : "The colleague who will complete your pending work while you are away. The administrator can see who you chose."
+          }
+        >
+          <Select value={f.coverUserId} onChange={set("coverUserId")} disabled={people === null}>
+            <option value="">{people === null ? "Loading staff..." : "Choose a staff member"}</option>
+            {(people || []).map((p) => (
+              <option key={p._id} value={p._id} disabled={p.onLeave}>
+                {p.name}
+                {p.role ? ` - ${p.role}` : ""}
+                {p.onLeave ? " (on leave)" : ""}
+              </option>
+            ))}
+          </Select>
+        </Field>
       </div>
     </Modal>
   );
@@ -102,7 +142,8 @@ function Body() {
                 <tr key={l._id}>
                   <td className="px-4 py-3 font-semibold text-slate-800 whitespace-nowrap">{l.type}{l.halfDay && <span className="text-slate-400 font-normal"> (half)</span>}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{fmtDay(l.fromDate)}{l.fromDate !== l.toDate && ` – ${fmtDay(l.toDate)}`}
-                    {l.reason && <span className="block text-[10px] text-slate-400 max-w-[14rem] truncate" title={l.reason}>{l.reason}</span>}</td>
+                    {l.reason && <span className="block text-[10px] text-slate-400 max-w-[14rem] truncate" title={l.reason}>{l.reason}</span>}
+                    {l.coverUserName && <span className="block text-[10px] text-sky-600 font-semibold">Work covered by {l.coverUserName}</span>}</td>
                   <td className="px-4 py-3">{l.days}</td>
                   <td className="px-4 py-3"><Badge tone={TONE[l.status]}>{l.status}</Badge>{l.adminNote && <span className="block text-[10px] text-slate-400 mt-0.5">{l.adminNote}</span>}</td>
                   <td className="px-4 py-3 text-right">{(l.status === "Pending" || (l.status === "Approved" && l.fromDate > today)) && <button onClick={() => cancel(l)} className="text-[11px] font-semibold text-red-500 hover:underline">Cancel</button>}</td>

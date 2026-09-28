@@ -34,8 +34,8 @@ export function WorkItemList({ items = [], domains, className = "" }) {
             <span className={`inline-block rounded-full border px-2.5 py-0.5 text-[10px] font-black ${DOMAIN_STYLE[domain] || "bg-slate-50 text-slate-600 border-slate-200"}`}>{domain}</span>
             <ul className="mt-1.5 space-y-1">
               {list.map((i) => (
-                <li key={i.itemId} className="flex items-start gap-2 text-xs font-semibold text-slate-700">
-                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded bg-teal-100 text-[9px] font-black text-teal-700">{i.itemId}</span>
+                <li key={`${i.itemId}-${i.title}`} className="flex items-start gap-2 text-xs font-semibold text-slate-700">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500" aria-hidden="true" />
                   <span className="break-words">{i.title}</span>
                 </li>
               ))}

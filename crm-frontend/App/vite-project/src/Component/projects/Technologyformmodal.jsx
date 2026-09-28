@@ -538,7 +538,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved, edit
                             ) : (
                               <span className="flex-1 font-semibold text-slate-800">{displayTitle}</span>
                             )}
-                            <span className="shrink-0 text-[10px] font-black text-slate-300">{assignedIds.has(i.id) ? <span className="text-emerald-500">assigned</span> : custom ? "new" : typeof i.id === "number" ? `#${i.id}` : ""}</span>
+                            <span className="shrink-0 text-[10px] font-black text-slate-300">{assignedIds.has(i.id) ? <span className="text-emerald-500">assigned</span> : custom ? "new" : ""}</span>
                           </label>
                           {!isEditing && (
                             <button

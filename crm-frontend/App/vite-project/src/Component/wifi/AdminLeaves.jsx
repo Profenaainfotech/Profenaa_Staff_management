@@ -30,6 +30,7 @@ function DecideModal({ item, decision, onClose, onDone }) {
     <Modal open onClose={onClose} size="sm" title={`${decision === "Approved" ? "Approve" : "Reject"} leave`} subtitle={`${item.userName} · ${item.type}`}
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={decision === "Approved" ? "success" : "danger"} loading={busy} onClick={go}>{decision === "Approved" ? "Approve" : "Reject"}</Button></>}>
       <p className="text-xs text-slate-600 mb-3">{fmtDay(item.fromDate)}{item.fromDate !== item.toDate && ` – ${fmtDay(item.toDate)}`} · {item.days} working day{item.days === 1 ? "" : "s"}{item.halfDay ? " (half day)" : ""}. “{item.reason}”</p>
+      <p className="text-xs text-slate-600 mb-3"><b>Alternative staff:</b> {item.coverUserName || "Not chosen"}</p>
       <Field label="Note to the employee (optional)"><TextArea value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} /></Field>
     </Modal>
   );
@@ -55,7 +56,7 @@ function Requests({ onPending }) {
       {list.loading && !list.data ? <Spinner /> : items.length === 0 ? (
         <Card><Empty icon={<CalendarOff size={20} />} title={`No ${status === "All" ? "" : status.toLowerCase() + " "}leave requests`} /></Card>
       ) : (
-        <Table head={["Employee", "Type", "Dates", "Days", "Reason", "Status", ""]}>
+        <Table head={["Employee", "Type", "Dates", "Days", "Reason", "Alternative staff", "Status", ""]}>
           {items.map((l) => (
             <tr key={l._id}>
               <td className="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">{l.userName}<span className="block text-[10px] text-slate-400 font-normal">{timeAgo(l.createdAt)}</span></td>
@@ -63,6 +64,7 @@ function Requests({ onPending }) {
               <td className="px-4 py-3 whitespace-nowrap">{fmtDay(l.fromDate)}{l.fromDate !== l.toDate && ` – ${fmtDay(l.toDate)}`}</td>
               <td className="px-4 py-3">{l.days}</td>
               <td className="px-4 py-3 text-slate-600 max-w-[18rem]"><span className="line-clamp-2" title={l.reason}>{l.reason}</span></td>
+              <td className="px-4 py-3 whitespace-nowrap">{l.coverUserName ? <span className="font-semibold text-slate-700">{l.coverUserName}</span> : <span className="text-slate-300">—</span>}</td>
               <td className="px-4 py-3"><Badge tone={TONE[l.status]}>{l.status}</Badge>{l.decidedBy && <span className="block text-[10px] text-slate-400 mt-0.5">by {l.decidedBy}</span>}</td>
               <td className="px-4 py-3 text-right whitespace-nowrap">
                 {l.status === "Pending" && (
@@ -165,4 +167,3 @@ function Body() {
 export default function AdminLeaves() {
   return <Themed role="admin"><Body /></Themed>;
 }
-
