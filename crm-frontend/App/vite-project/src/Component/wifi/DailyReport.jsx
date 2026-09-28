@@ -11,6 +11,9 @@ import { Badge, Button, Card, ErrorNote, Field, Modal, PageHeader, Select, Spinn
 const CATEGORIES = ["Development", "Testing / QA", "Design", "Meeting", "Support", "Learning", "Documentation", "Admin / Other"];
 const ENTRY_STATUS = ["Completed", "In Progress", "Blocked"];
 const STATUS_TONE = { Completed: "green", "In Progress": "blue", Blocked: "red" };
+// The status is stored as "Blocked"; what people read is "Unable to complete"
+const STATUS_LABEL = { Blocked: "Unable to complete" };
+const statusText = (s) => STATUS_LABEL[s] || s;
 
 const toMin = (t) => (/^\d{2}:\d{2}$/.test(t || "") ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : null);
 const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -51,7 +54,7 @@ function ReportView({ report, onClose }) {
               <td className="px-4 py-3 text-slate-600">{e.project || <span className="text-slate-300">--</span>}</td>
               <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{e.category}</td>
               <td className="px-4 py-3 text-slate-800 min-w-[14rem]">{e.task}</td>
-              <td className="px-4 py-3"><Badge tone={STATUS_TONE[e.status] || "slate"}>{e.status}</Badge></td>
+              <td className="px-4 py-3"><Badge tone={STATUS_TONE[e.status] || "slate"}>{statusText(e.status)}</Badge></td>
               <td className="px-4 py-3 whitespace-nowrap font-semibold">{fmtMinutes(e.minutes)}</td>
             </tr>
           ))}
@@ -244,6 +247,10 @@ function Body() {
 
       {editable && (
         <>
+      {/* 1st: the Technologies Task card - tick the allocated work, then confirm the list */}
+      {tech && <TechWorkCard tech={tech} done={techDone} onToggle={toggleTech} confirmed={techConfirmed} onConfirm={(v) => { setTechConfirmed(v); setDirty(true); }} />}
+
+      {/* 2nd: the Daily Report (DHR) - work log and end-of-day summary, then submit */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           ["Shift", shift ? `${shift.start} – ${shift.end}` : "--"],
@@ -282,22 +289,20 @@ function Body() {
                   </Select>
                 </Field>
                 <Field label="Status" className="md:col-span-2">
-                  <Select value={r.status} disabled={locked} onChange={(e) => edit(i, { status: e.target.value })}>{ENTRY_STATUS.map((s) => <option key={s}>{s}</option>)}</Select>
+                  <Select value={r.status} disabled={locked} onChange={(e) => edit(i, { status: e.target.value })}>{ENTRY_STATUS.map((s) => <option key={s} value={s}>{statusText(s)}</option>)}</Select>
                 </Field>
               </div>
               <Field label="What did you do?" className="mt-2.5">
                 <TextArea value={r.task} rows={2} disabled={locked} maxLength={500} placeholder="Describe the work in a sentence or two: what, for whom, and the result." onChange={(e) => edit(i, { task: e.target.value })} />
               </Field>
               <div className="flex items-center justify-between mt-2">
-                <span className="text-[11px] font-semibold text-slate-500">{rowMinutes(r) ? fmtMinutes(rowMinutes(r)) : "--"}{locked && <Badge tone={STATUS_TONE[r.status] || "slate"} className="ml-2">{r.status}</Badge>}</span>
+                <span className="text-[11px] font-semibold text-slate-500">{rowMinutes(r) ? fmtMinutes(rowMinutes(r)) : "--"}{locked && <Badge tone={STATUS_TONE[r.status] || "slate"} className="ml-2">{statusText(r.status)}</Badge>}</span>
                 {!locked && <button onClick={() => remove(i)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-500 hover:underline" aria-label={`Remove entry ${i + 1}`}><Trash2 size={12} /> Remove</button>}
               </div>
             </li>
           ))}
         </ol>
       </Card>
-
-      {tech && <TechWorkCard tech={tech} done={techDone} onToggle={toggleTech} confirmed={techConfirmed} onConfirm={(v) => { setTechConfirmed(v); setDirty(true); }} />}
 
       <Card>
         <p className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2"><FilePenLine size={15} className="text-sky-500" /> End-of-day summary</p>

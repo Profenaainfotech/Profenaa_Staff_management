@@ -1,7 +1,7 @@
 // =====================================================================
 // TECHNOLOGIES PROJECTS - the catalog the admin picks from
 //
-//   7 domains  ->  26 work items. Every item belongs to exactly one domain.
+//   7 domains  ->  25 work items. Every item belongs to exactly one domain.
 //
 // This file is the ONE place the list lives: the admin form loads it from
 // GET /api/Project/technology-catalog, and createTechnologyProject validates
@@ -41,7 +41,6 @@ const ITEMS = [
   { id: 17, title: "Students feedback followup", domain: "Training" },
   { id: 18, title: "Placement training", domain: "Placement" },
   { id: 19, title: "YouTube maintenance", domain: "Social Media" },
-  { id: 20, title: "Certifications and ID cards follow up", domain: "Training" },
   { id: 21, title: "Intern certificates, experience certificates followup", domain: "HR" },
   { id: 22, title: "Offer letters process", domain: "HR" },
   { id: 23, title: "Telecalling for lead generation", domain: "Sales" },

@@ -102,6 +102,12 @@ export function isValidLink(value) {
   }
 }
 
+// One name for the Technologies category everywhere it is shown (buttons, tabs, badges, headings)
+export const TECH_LABEL = "Technologies / Institute Projects";
+export const TECH_SHORT = "Technologies / Institute";
+/** The name to show for a project type - only Technologies is renamed, the others are shown as they are */
+export const typeLabel = (t) => (t === "Technologies" ? TECH_SHORT : t);
+
 export const TYPE_STYLE = {
   Internal: "bg-blue-50 text-blue-700 border-blue-200",
   External: "bg-violet-50 text-violet-700 border-violet-200",

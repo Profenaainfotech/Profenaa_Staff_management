@@ -47,11 +47,13 @@ import {
   Cpu,
 } from "lucide-react";
 import ProjectFormModal from "./projects/ProjectFormModal";
-import TechnologyFormModal from "./projects/TechnologyFormModal";
+import TechnologyFormModal from "./projects/Technologyformmodal";
 import { DomainChips, WorkItemList } from "./projects/TechnologyWork";
 import {
+  TECH_LABEL,
   TYPE_STYLE,
   fmtMinutes,
+  typeLabel,
   imageUrl,
   projectImages,
   projectRequest,
@@ -1145,8 +1147,8 @@ export default function ProjectManagement() {
             >
               <Plus size={17} />
 
-              <span className="hidden 2xl:inline">Technologies / Institutions Projects</span>
-              <span className="2xl:hidden">Technologies/Inst</span>
+              <span className="hidden 2xl:inline">{TECH_LABEL}</span>
+              <span className="2xl:hidden">Technologies/Institute</span>
             </button>
 
           </div>
@@ -1475,7 +1477,7 @@ export default function ProjectManagement() {
                 active ? "text-slate-900" : "text-slate-400 hover:text-slate-700"
               }`}
             >
-              {t === "Technologies" ? "Technologies / Institutions Projects" : `${t} Projects`}
+              {t === "Technologies" ? TECH_LABEL : `${t} Projects`}
               <span className={`text-xs font-semibold ${active ? "text-slate-500" : "text-slate-300 group-hover:text-slate-400"}`}>{count}</span>
               <span
                 className={`absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-slate-900 transition-all duration-200 ${
@@ -2065,7 +2067,7 @@ export default function ProjectManagement() {
                               <span
                                 className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black ${TYPE_STYLE[typeOf(project)]}`}
                               >
-                                {typeOf(project)}
+                                {typeLabel(typeOf(project))}
                               </span>
                               {typeOf(project) === "Technologies" && (
                                 <DomainChips domains={project.domains} className="mt-1.5 max-w-[250px]" />
@@ -2569,7 +2571,7 @@ export default function ProjectManagement() {
                   <span
                     className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${TYPE_STYLE[typeOf(selectedProject)]}`}
                   >
-                    {typeOf(selectedProject)} project
+                    {typeOf(selectedProject) === "Technologies" ? TECH_LABEL : `${typeOf(selectedProject)} project`}
                   </span>
                   {selectedProject?.status === "Completed" && (
                     <span

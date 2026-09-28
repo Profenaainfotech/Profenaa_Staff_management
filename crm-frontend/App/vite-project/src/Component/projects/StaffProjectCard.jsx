@@ -4,7 +4,7 @@
 // starting it, submitting a link, being marked complete - happens on the Task, in My Tasks.
 import React from "react";
 import { CalendarClock, Eye, Image as ImageIcon, Loader2, Rocket, TriangleAlert } from "lucide-react";
-import { TYPE_STYLE, imageUrl, projectImages, timeLeft } from "./projectApi";
+import { TYPE_STYLE, imageUrl, projectImages, timeLeft, typeLabel } from "./projectApi";
 
 const TONE = {
   green: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -44,7 +44,7 @@ export default function StaffProjectCard({ project, hasActive, busy, onTake, onO
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <h4 className="truncate text-sm font-black text-slate-900">{project.title}</h4>
-          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${TYPE_STYLE[project.projectType] || TYPE_STYLE.Internal}`}>{project.projectType}</span>
+          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${TYPE_STYLE[project.projectType] || TYPE_STYLE.Internal}`}>{typeLabel(project.projectType)}</span>
           <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-black text-slate-500">Available</span>
         </div>
 

@@ -22,14 +22,14 @@ export default function MyTechnologyProjects({ tasks = [], todayDoneTitles, onOp
   if (!mine.length) return null;
 
   return (
-    <section aria-label="My Technologies projects">
+    <section aria-label="My Technologies / Institute Projects">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-100 text-teal-700">
             <Cpu size={19} />
           </span>
           <div>
-            <h3 className="text-lg font-black text-slate-900">My Technologies Projects</h3>
+            <h3 className="text-lg font-black text-slate-900">My Technologies / Institute Projects</h3>
             <p className="text-[11px] text-slate-500">Work the administrator has allocated to you, by domain. Tick what you complete each day in your Daily Report.</p>
           </div>
         </div>

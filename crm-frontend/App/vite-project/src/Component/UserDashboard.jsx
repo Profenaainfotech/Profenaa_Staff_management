@@ -37,6 +37,7 @@ import Attendance from "../Component/Attendance";
 // Wi-Fi attendance, leaves and live notifications
 import MyAttendance from "./wifi/MyAttendance";
 import { OffDayBanner } from "./wifi/ShiftEnd";
+import ShiftPromptHost from "./wifi/ShiftPromptHost";
 import MyLeaves from "./wifi/MyLeaves";
 import NotificationCenter from "./wifi/NotificationCenter";
 import DailyReport from "./wifi/DailyReport";
@@ -1593,34 +1594,19 @@ export default function UserDashboard() {
                 <RefreshCw size={16} />
               </button>
 
+              {/* ACTIVITIES: task and project details (assigned, comments, removed ...), attendance, announcements */}
               <NotificationCenter
                 role="user"
+                view="activity"
                 onNavigate={changeTab}
               />
 
-              <button
-                onClick={() =>
-                  setStatusNotification(null)
-                }
-                className={`
-                  relative w-9 h-9 flex items-center justify-center
-                  rounded-xl border
-                  transition
-                  ${
-                    statusNotification
-                      ? "border-sky-300 bg-sky-50 text-sky-600"
-                      : "border-slate-200 bg-white hover:bg-slate-50"
-                  }
-                `}
-              >
-
-                <Bell size={16} />
-
-                {statusNotification && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-sky-500 border-2 border-white rounded-full" />
-                )}
-
-              </button>
+              {/* NOTIFICATIONS: only the personal things - leave approved / rejected, Daily Report (DHR) work allocated by the admin */}
+              <NotificationCenter
+                role="user"
+                view="personal"
+                onNavigate={changeTab}
+              />
 
               <div className="hidden sm:flex items-center gap-2 ml-2 pl-3 border-l border-slate-200">
 
@@ -1655,6 +1641,9 @@ export default function UserDashboard() {
         ===================================================== */}
 
         <div className="p-4 sm:p-6 lg:p-8">
+
+          {/* "Are you still working?" / "Are you working today?" - Yes / No buttons, on every tab */}
+          <ShiftPromptHost />
 
           {error && (
             <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-xs flex items-start gap-3">
@@ -2471,7 +2460,7 @@ function TaskList({
                 <div className="flex flex-wrap items-center gap-1.5">
                   <h3 className="truncate text-sm font-bold text-slate-900">{task.title || "Untitled Task"}</h3>
                   {isTech && (
-                    <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-black text-teal-700">Technologies</span>
+                    <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-black text-teal-700">Technologies / Institute</span>
                   )}
                 </div>
                 {isTech ? (

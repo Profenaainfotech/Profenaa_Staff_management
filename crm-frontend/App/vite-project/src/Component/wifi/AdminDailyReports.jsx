@@ -10,13 +10,16 @@ import { TechWorkView, pctText, pctTone } from "./TechWorkCard";
 import TechTasksAdmin from "./TechTasksAdmin";
 
 const STATUS_TONE = { Completed: "green", "In Progress": "blue", Blocked: "red" };
+// The status is stored as "Blocked"; what people read is "Unable to complete"
+const STATUS_LABEL = { Blocked: "Unable to complete" };
+const statusText = (s) => STATUS_LABEL[s] || s;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function printReport(r, att) {
   const w = window.open("", "_blank", "width=900,height=1000");
   if (!w) return;
   const rows = (r.entries || [])
-    .map((e) => `<tr><td>${esc(e.from)} – ${esc(e.to)}</td><td>${esc(e.project)}</td><td>${esc(e.category)}</td><td>${esc(e.task)}</td><td>${esc(e.status)}</td><td style="text-align:right">${esc(fmtMinutes(e.minutes))}</td></tr>`)
+    .map((e) => `<tr><td>${esc(e.from)} – ${esc(e.to)}</td><td>${esc(e.project)}</td><td>${esc(e.category)}</td><td>${esc(e.task)}</td><td>${esc(statusText(e.status))}</td><td style="text-align:right">${esc(fmtMinutes(e.minutes))}</td></tr>`)
     .join("");
   const block = (t, v) => (v ? `<h3>${t}</h3><p>${esc(v).replace(/\n/g, "<br>")}</p>` : "");
   const tw = r.techWork;
@@ -91,7 +94,7 @@ function ReportModal({ id, onClose, onChanged }) {
                 <td className="px-4 py-3 text-slate-600">{e.project || <span className="text-slate-300">--</span>}</td>
                 <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{e.category}</td>
                 <td className="px-4 py-3 text-slate-800 min-w-[14rem]">{e.task}</td>
-                <td className="px-4 py-3"><Badge tone={STATUS_TONE[e.status] || "slate"}>{e.status}</Badge></td>
+                <td className="px-4 py-3"><Badge tone={STATUS_TONE[e.status] || "slate"}>{statusText(e.status)}</Badge></td>
                 <td className="px-4 py-3 whitespace-nowrap font-semibold">{fmtMinutes(e.minutes)}</td>
               </tr>
             ))}
@@ -159,7 +162,7 @@ function ReportsBody() {
     downloadCsv(`daily-reports-${from}_${to}.csv`, [
       ["Date", "Employee", "Role", "Branch", "Status", "From", "To", "Project", "Category", "Work done", "Entry status", "Minutes", "Tech task % (day)", "Tech ticked / allocated"],
       ...reports.flatMap((r) =>
-        (r.entries?.length ? r.entries : [{}]).map((e) => [r.date, r.userName, r.role, r.branchId?.name || "", r.status, e.from || "", e.to || "", e.project || "", e.category || "", e.task || "", e.status || "", e.minutes ?? "", r.techWork?.allocated > 0 ? r.techWork.percent : "", r.techWork?.allocated > 0 ? `${r.techWork.ticked}/${r.techWork.allocated}` : ""])
+        (r.entries?.length ? r.entries : [{}]).map((e) => [r.date, r.userName, r.role, r.branchId?.name || "", r.status, e.from || "", e.to || "", e.project || "", e.category || "", e.task || "", statusText(e.status) || "", e.minutes ?? "", r.techWork?.allocated > 0 ? r.techWork.percent : "", r.techWork?.allocated > 0 ? `${r.techWork.ticked}/${r.techWork.allocated}` : ""])
       ),
     ]);
 

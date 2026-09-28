@@ -2,9 +2,11 @@
 // It sits NEXT TO the existing task-alert bell; that one is untouched.
 //
 //   <NotificationCenter role="admin" onNavigate={setActiveTab} />
-//   <NotificationCenter role="user"  onNavigate={changeTab} />
+//   <NotificationCenter role="user"  onNavigate={changeTab} view="activity" />   Activities icon: task / project / attendance ...
+//   <NotificationCenter role="user"  onNavigate={changeTab} view="personal" />   Notifications bell: leave decisions, DHR allocated by the admin
+// view="all" (the default) shows everything, exactly as before.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, BellOff, CheckCheck, CheckCircle2, Info, Inbox, Megaphone, ShieldAlert, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { AlertTriangle, Bell as BellIcon, BellOff, CheckCheck, CheckCircle2, Info, Inbox, Megaphone, ShieldAlert, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import { subscribe } from "../../lib/socket";
 import { timeAgo } from "../../lib/format";
 import { isMuted, playAlert, setMuted, topSeverity } from "../../lib/sound";
@@ -16,6 +18,12 @@ const SEVERITY = {
   success: { icon: CheckCircle2, dot: "bg-emerald-100 text-emerald-600" },
   info: { icon: Info, dot: "bg-sky-100 text-sky-600" },
 };
+
+// The personal things a staff member is told about: the admin's decision on a leave request,
+// and the Daily Report (DHR) work the admin allocates or reopens. Everything else (tasks,
+// projects, attendance ...) belongs under the Activities icon.
+const PERSONAL_TYPES = new Set(["LEAVE_APPROVED", "LEAVE_REJECTED", "TECH_TASK_ALLOCATED", "DAILY_REPORT_REOPENED"]);
+const belongsTo = (view, n) => (view === "personal" ? PERSONAL_TYPES.has(n.type) : view === "activity" ? !PERSONAL_TYPES.has(n.type) : true);
 
 // Delete by date. "today" is counted from midnight India time, "week" is the last 7 days.
 const RANGES = [
@@ -87,7 +95,7 @@ function DeleteOptions({ range, setRange, readOnly, setReadOnly, counts, confirm
   );
 }
 
-function Bell({ onNavigate }) {
+function Bell({ onNavigate, view = "all" }) {
   const role = useRole();
   const api = useApi();
   const toast = useToast();
@@ -116,11 +124,12 @@ function Bell({ onNavigate }) {
 
   const load = useCallback(async (quiet = false) => {
     try {
-      const r = await api.get("/api/notifications", { limit: 30 });
-      setItems(r.notifications);
-      setUnread(r.unreadCount);
+      const r = await api.get("/api/notifications", { limit: view === "all" ? 30 : 100 });
+      // a filtered view (Activities / Notifications) only shows and counts its own kind
+      const list = (r.notifications || []).filter((n) => belongsTo(view, n));
+      setItems(list);
+      setUnread(view === "all" ? r.unreadCount : list.filter((n) => !n.readAt).length);
       // a notification that arrived while the live connection was down still makes its sound
-      const list = r.notifications || [];
       if (seen.current === null) {
         seen.current = new Set(list.map((n) => n._id));
       } else {
@@ -133,11 +142,12 @@ function Bell({ onNavigate }) {
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, view]);
 
   useEffect(() => {
     load();
     const off = subscribe(role, "notification", (n) => {
+      if (!belongsTo(view, n)) return;
       setItems((cur) => [n, ...cur.filter((x) => x._id !== n._id)].slice(0, 50));
       setUnread((u) => u + 1);
       seen.current?.add(n._id);
@@ -163,7 +173,7 @@ function Bell({ onNavigate }) {
       off();
       clearInterval(poll);
     };
-  }, [role, load, toast]);
+  }, [role, load, toast, view]);
 
   const say = useCallback((kind, message) => {
     clearTimeout(flashTimer.current);
@@ -212,7 +222,22 @@ function Bell({ onNavigate }) {
   const readAll = async () => {
     setItems((cur) => cur.map((x) => ({ ...x, readAt: x.readAt || new Date().toISOString() })));
     setUnread(0);
-    api.post("/api/notifications/read-all").catch(() => {});
+    if (view === "all") {
+      api.post("/api/notifications/read-all").catch(() => {});
+      return;
+    }
+    // filtered view: mark only its own notifications, never the other icon's
+    items.filter((n) => !n.readAt).forEach((n) => api.patch(`/api/notifications/${n._id}/read`).catch(() => {}));
+  };
+
+  // filtered view: delete everything this icon shows (the by-date chooser would also hit the other icon's items)
+  const clearShown = async () => {
+    if (!items.length || !window.confirm(`Delete these ${items.length} notification${items.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    const ids = items.map((n) => n._id);
+    setItems([]);
+    setUnread(0);
+    await Promise.all(ids.map((id) => api.del(`/api/notifications/${id}`).catch(() => {})));
+    load(true);
   };
 
   // delete a single notification (read or unread)
@@ -256,13 +281,13 @@ function Bell({ onNavigate }) {
           setMenu(false);
           setConfirm(false);
         }}
-        title="Activity and alerts"
-        aria-label="Activity and alerts"
+        title={view === "personal" ? "Notifications" : "Activity and alerts"}
+        aria-label={view === "personal" ? "Notifications" : "Activity and alerts"}
         className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl border bg-white hover:bg-sky-50 flex items-center justify-center transition ${
           unread ? (role === "admin" ? "border-blue-300 text-blue-700" : "border-sky-300 text-sky-600") : "border-slate-200 text-slate-600"
         }`}
       >
-        <Inbox size={17} />
+        {view === "personal" ? <BellIcon size={17} /> : <Inbox size={17} />}
         {unread > 0 && (
           <span className={`absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full ${accent} text-white text-[9px] font-black flex items-center justify-center`}>
             {unread > 99 ? "99+" : unread}
@@ -274,7 +299,7 @@ function Bell({ onNavigate }) {
         <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-2rem))] max-h-[75vh] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
             <div>
-              <p className="text-sm font-bold text-slate-900">Activity</p>
+              <p className="text-sm font-bold text-slate-900">{view === "personal" ? "Notifications" : "Activity"}</p>
               <p className="text-[10px] text-slate-400">{unread ? `${unread} unread` : "You're all caught up"}</p>
             </div>
             <div className="flex items-center gap-1">
@@ -295,7 +320,12 @@ function Bell({ onNavigate }) {
                 <CheckCheck size={15} />
               </button>
               <button
-                onClick={() => { setMenu((v) => !v); setSession((n) => n + 1); setConfirm(false); }}
+                onClick={() => {
+                  if (view !== "all") return clearShown();
+                  setMenu((v) => !v);
+                  setSession((n) => n + 1);
+                  setConfirm(false);
+                }}
                 className={`p-2 rounded-lg hover:bg-slate-100 ${menu ? "bg-red-50 text-red-600" : "text-slate-500"}`}
                 title="Delete notifications"
                 aria-label="Delete notifications"
@@ -340,7 +370,7 @@ function Bell({ onNavigate }) {
             {!loading && items.length === 0 && (
               <div className="flex flex-col items-center py-12 text-slate-400">
                 <BellOff size={22} />
-                <p className="text-xs mt-2">No notifications yet</p>
+                <p className="text-xs mt-2">{view === "personal" ? "No leave or Daily Report notifications yet" : "No notifications yet"}</p>
               </div>
             )}
             {items.map((n) => {
@@ -453,10 +483,10 @@ function AnnounceModal({ open, onClose }) {
   );
 }
 
-export default function NotificationCenter({ role, onNavigate }) {
+export default function NotificationCenter({ role, onNavigate, view = "all" }) {
   return (
     <Themed role={role}>
-      <Bell onNavigate={onNavigate} />
+      <Bell onNavigate={onNavigate} view={view} />
     </Themed>
   );
 }

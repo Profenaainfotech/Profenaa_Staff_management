@@ -406,7 +406,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved, edit
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label={isEdit ? "Edit Technologies project" : "Create Technologies project"}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label={isEdit ? "Edit Technologies / Institute Projects" : "Create Technologies / Institute Projects"}>
       <form onSubmit={submit} noValidate className="flex max-h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         {/* header */}
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
@@ -415,7 +415,7 @@ export default function TechnologyFormModal({ users = [], onClose, onSaved, edit
               <Cpu size={20} />
             </span>
             <div>
-              <h2 className="text-xl font-black text-slate-900">{isEdit ? "Edit Technologies / Education Project" : "Create Technologies / Education Project"}</h2>
+              <h2 className="text-xl font-black text-slate-900">{isEdit ? "Edit Technologies / Institute Projects" : "Create Technologies / Institute Projects"}</h2>
               <p className="mt-1 text-xs text-slate-500">
                 {isEdit
                   ? "The work already assigned is ticked. Tick more to add it to this same project, or untick to remove it."

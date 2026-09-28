@@ -9,7 +9,7 @@ import { FlashBanner } from "./Flash";
 import { useFlash } from "./useFlash";
 import ProjectDetailsModal from "./ProjectDetailsModal";
 import StaffProjectCard from "./StaffProjectCard";
-import { projectRequest } from "./projectApi";
+import { projectRequest, typeLabel } from "./projectApi";
 import { DomainChips, WorkItemList } from "./TechnologyWork";
 
 const SHOW = 6;
@@ -67,7 +67,7 @@ export default function RecentProjects({ pool = [], tasks = [], todayDoneTitles,
       <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter projects by type">
         {["All", "Internal", "External", "Technologies"].map((t) => (
           <button key={t} type="button" onClick={() => setType(t)} aria-pressed={type === t} className={`rounded-full border px-3.5 py-1.5 text-xs font-bold transition ${type === t ? "border-sky-500 bg-sky-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300"}`}>
-            {t} <span className={type === t ? "text-white/80" : "text-slate-400"}>({counts[t]})</span>
+            {typeLabel(t)} <span className={type === t ? "text-white/80" : "text-slate-400"}>({counts[t]})</span>
           </button>
         ))}
       </div>
@@ -78,7 +78,7 @@ export default function RecentProjects({ pool = [], tasks = [], todayDoneTitles,
         techTasks.length === 0 ? (
           <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center">
             <PackageOpen size={32} className="mb-2 text-slate-300" />
-            <p className="text-sm font-bold text-slate-700">No Technologies work allocated to you</p>
+            <p className="text-sm font-bold text-slate-700">No Technologies / Institute work allocated to you</p>
             <p className="mt-1 text-xs text-slate-400">Work the administrator allocates to you will appear here.</p>
           </div>
         ) : (

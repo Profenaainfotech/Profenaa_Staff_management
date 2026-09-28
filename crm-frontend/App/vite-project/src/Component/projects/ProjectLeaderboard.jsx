@@ -5,7 +5,7 @@
 import React, { useMemo, useState } from "react";
 import { Crown, Flame, Medal, RefreshCw, Target, Timer, Trophy } from "lucide-react";
 import { useAsync, useLiveRefresh } from "../../lib/hooks";
-import { fmtMinutes, projectRequest } from "./projectApi";
+import { fmtMinutes, projectRequest, typeLabel } from "./projectApi";
 
 const PERIODS = [
   ["all", "All time"],
@@ -65,7 +65,7 @@ export default function ProjectLeaderboard({ role = "user", compact = false }) {
       <div className="mt-4 flex flex-wrap gap-x-6 gap-y-3">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Project type">
           {["All", "Internal", "External", "Technologies"].map((t) => (
-            <Chip key={t} active={type === t} onClick={() => setType(t)}>{t}</Chip>
+            <Chip key={t} active={type === t} onClick={() => setType(t)}>{typeLabel(t)}</Chip>
           ))}
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Period">

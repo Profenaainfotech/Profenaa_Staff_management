@@ -1,7 +1,7 @@
 // Small add-on for existing project cards: type, validity time (or result) and the error / change to fix.
 import React from "react";
 import { AlertCircle, CalendarClock, CheckCircle2 } from "lucide-react";
-import { TYPE_STYLE, fmtMinutes, timeLeft } from "./projectApi";
+import { TYPE_STYLE, fmtMinutes, timeLeft, typeLabel } from "./projectApi";
 
 const TONE = {
   green: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -17,7 +17,7 @@ export default function ProjectExtras({ project }) {
   return (
     <div className="mt-3 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${TYPE_STYLE[type]}`}>{type}</span>
+        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${TYPE_STYLE[type]}`}>{typeLabel(type)}</span>
         {done ? (
           <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black ${project.completedOnTime === false ? TONE.amber : TONE.green}`}>
             <CheckCircle2 size={11} />

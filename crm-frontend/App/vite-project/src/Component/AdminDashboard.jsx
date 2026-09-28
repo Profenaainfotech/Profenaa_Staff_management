@@ -570,15 +570,13 @@ const extractSubmissionsFromTasks = (
         task
       );
 
+    // A task only counts as a submission once someone has really submitted it (that is what
+    // sets submittedAt). Its description, or the fact that it was assigned / created / updated,
+    // is NOT a submission - those used to show up here as if staff had submitted them.
     const hasDirectSubmission =
-      directDriveLink ||
-      directContent ||
-      directCommand ||
       task.submittedAt ||
       task.submittedOn ||
-      task.submissionDate ||
-      task.submissionType ||
-      task.submissionStatus;
+      task.submissionDate;
 
     if (
       !foundCollection &&
@@ -961,6 +959,14 @@ export default function AdminDashboard() {
   const submissionInitializedRef =
     useRef(false);
 
+  // The latest tasks / dedicated-endpoint submissions, readable from the 10-second refresh
+  // timer (a timer set up once only sees the values of its first render - which is empty).
+  const taskListRef =
+    useRef([]);
+
+  const endpointSubmissionsRef =
+    useRef([]);
+
   const audioContextRef =
     useRef(null);
 
@@ -1171,6 +1177,42 @@ export default function AdminDashboard() {
   /* =====================================================
      PROCESS NEW WORK SUBMISSIONS (notification + alarm)
   ===================================================== */
+
+  // Same submissions as before -> keep the very same list (no re-render, so the table never
+  // flashes or jumps on the automatic refresh). Anything that is no longer a real
+  // submission drops out instead of staying forever.
+  const applySubmissionList =
+    () => {
+      const next =
+        dedupeSubmissions([
+          ...endpointSubmissionsRef.current,
+          ...extractSubmissionsFromTasks(
+            taskListRef.current
+          ),
+        ]);
+
+      const signature = (
+        list
+      ) =>
+        list
+          .map(
+            (item) =>
+              `${item._id}|${item.submittedAt}|${item.driveLink}|${item.submissionContent}|${item.command}`
+          )
+          .join("~");
+
+      setSubmissionList(
+        (current) =>
+          signature(current) ===
+          signature(next)
+            ? current
+            : next
+      );
+
+      processSubmissionNotifications(
+        next
+      );
+    };
 
   const processSubmissionNotifications =
     (list) => {
@@ -1442,32 +1484,10 @@ export default function AdminDashboard() {
           safeTasks
         );
 
-        const embedded =
-          extractSubmissionsFromTasks(
-            safeTasks
-          );
+        taskListRef.current =
+          safeTasks;
 
-        if (
-          embedded.length > 0
-        ) {
-          setSubmissionList(
-            (current) => {
-              const merged =
-                dedupeSubmissions(
-                  [
-                    ...current,
-                    ...embedded,
-                  ]
-                );
-
-              processSubmissionNotifications(
-                merged
-              );
-
-              return merged;
-            }
-          );
-        }
+        applySubmissionList();
       } catch (error) {
         console.error(
           "FETCH TASKS ERROR:",
@@ -1565,52 +1585,24 @@ export default function AdminDashboard() {
               )
               .filter(Boolean);
 
-          if (
-            normalized.length >
-            0
-          ) {
-            setSubmissionList(
-              normalized
-            );
-
-            processSubmissionNotifications(
-              normalized
-            );
-
-            return;
-          }
+          endpointSubmissionsRef.current =
+            normalized;
+        } else {
+          endpointSubmissionsRef.current =
+            [];
         }
 
-        const embedded =
-          extractSubmissionsFromTasks(
-            taskList
-          );
-
-        setSubmissionList(
-          embedded
-        );
-
-        processSubmissionNotifications(
-          embedded
-        );
+        applySubmissionList();
       } catch (error) {
         console.warn(
           "Dedicated submissions endpoint unavailable. Using task fallback.",
           error
         );
 
-        const embedded =
-          extractSubmissionsFromTasks(
-            taskList
-          );
+        endpointSubmissionsRef.current =
+          [];
 
-        setSubmissionList(
-          embedded
-        );
-
-        processSubmissionNotifications(
-          embedded
-        );
+        applySubmissionList();
       } finally {
         setSubmissionLoading(
           false
@@ -5937,9 +5929,10 @@ export default function AdminDashboard() {
                                           task
                                         )
                                       }
+                                      title="Moves the task to its next status: Pending, In Progress, Completed, then back to Pending"
                                       className="px-3 py-1.5 bg-blue-900 text-white rounded-lg text-xs font-bold hover:bg-blue-800"
                                     >
-                                      Cycle Status
+                                      Reassign
                                     </button>
 
                                   </div>
