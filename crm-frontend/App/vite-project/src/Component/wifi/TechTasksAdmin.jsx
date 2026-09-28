@@ -9,7 +9,7 @@ import { useAsync, useLiveRefresh } from "../../lib/hooks";
 import { addDaysKey, fmtDay, istDateKey } from "../../lib/format";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Select, Spinner, Stat, Table, TextArea, TextInput, useApi, useConfirm, useToast } from "./ui";
 import { PercentBar, TechWorkView, pctText, pctTone } from "./TechWorkCard";
-import TechnologyFormModal from "../projects/TechnologyFormModal";
+import TechnologyFormModal from "../projects/Technologyformmodal";
 
 const KIND_LABEL = { Task: "Technologies task", PastWork: "Past work" };
 const KIND_TONE = { Task: "blue", PastWork: "violet" };

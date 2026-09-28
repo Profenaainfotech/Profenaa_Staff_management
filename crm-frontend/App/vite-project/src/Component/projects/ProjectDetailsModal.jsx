@@ -3,7 +3,7 @@
 // completion details from that point on live in My Tasks, not here.
 import React, { useEffect, useState } from "react";
 import { CalendarClock, Image as ImageIcon, TriangleAlert, UserRound, X } from "lucide-react";
-import { STATUS_STYLE, TYPE_STYLE, fmtDateTime, imageUrl, projectImages, timeLeft } from "./projectApi";
+import { STATUS_STYLE, TYPE_STYLE, fmtDateTime, imageUrl, projectImages, timeLeft, typeLabel } from "./projectApi";
 
 export default function ProjectDetailsModal({ project, onClose }) {
   const images = projectImages(project);
@@ -24,7 +24,7 @@ export default function ProjectDetailsModal({ project, onClose }) {
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap gap-2">
-              <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black ${TYPE_STYLE[project.projectType] || TYPE_STYLE.Internal}`}>{project.projectType}</span>
+              <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black ${TYPE_STYLE[project.projectType] || TYPE_STYLE.Internal}`}>{typeLabel(project.projectType)}</span>
               <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black ${STATUS_STYLE[project.status] || STATUS_STYLE.Pending}`}>{project.status === "Pending" ? "Available" : project.status}</span>
             </div>
             <h2 className="text-xl font-black text-slate-900">{project.title}</h2>
